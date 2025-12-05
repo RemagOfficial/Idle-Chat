@@ -547,16 +547,13 @@ function updateUpgradeButtonStates() {
         }
         
         // Update stat displays that might have changed
-        const currentBotsStat = document.querySelector('#buy-bot')?.closest('.upgrade-item')?.querySelector('.stat-value');
-        if (currentBotsStat && currentBotsStat.textContent.includes('Current Bots')) {
-            // Find the stat value for current bots
-            const botsStat = Array.from(document.querySelectorAll('.upgrade-stat')).find(stat => 
-                stat.querySelector('.stat-label')?.textContent === 'Current Bots:'
-            );
-            if (botsStat) {
-                const valueSpan = botsStat.querySelector('.stat-value');
-                if (valueSpan) valueSpan.textContent = formatNumber(gen.bots || 0, 0);
-            }
+        // Update bot count stat
+        const botsStat = Array.from(document.querySelectorAll('.upgrade-stat')).find(stat => 
+            stat.querySelector('.stat-label')?.textContent === 'Current Bots:'
+        );
+        if (botsStat) {
+            const valueSpan = botsStat.querySelector('.stat-value');
+            if (valueSpan) valueSpan.textContent = formatNumber(gen.bots || 0, 0);
         }
         
         // Update efficiency stat
