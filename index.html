@@ -8,8 +8,11 @@
 </head>
 <body>
     <div class="app-container">
+        <!-- Mobile Overlay -->
+        <div class="mobile-overlay" id="mobile-overlay"></div>
+        
         <!-- Left Sidebar Container -->
-        <div class="left-sidebar-container">
+        <div class="left-sidebar-container" id="left-sidebar-container">
             <!-- Server List Sidebar -->
             <div class="server-sidebar" id="server-sidebar">
                 <!-- Servers will be dynamically rendered here -->
@@ -50,8 +53,17 @@
         <!-- Main Content Area -->
         <div class="main-content">
             <div class="content-header">
+                <button class="mobile-menu-button" id="mobile-menu-button" aria-label="Toggle menu">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>
+                    </svg>
+                </button>
                 <div class="channel-title">
                     <span id="current-channel">manual-generation</span>
+                </div>
+                <div class="mobile-currency-display" id="mobile-currency-display">
+                    <div class="mobile-currency-value" id="mobile-currency-value">0</div>
+                    <div class="mobile-currency-rate" id="mobile-currency-rate">0.00 msg/s</div>
                 </div>
             </div>
             <div class="content-body" id="content-body">

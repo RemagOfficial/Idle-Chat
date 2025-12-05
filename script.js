@@ -7,6 +7,7 @@ const GENERATOR_COSTS = {
 
 // Manual generation tracking
 let manualGenerationHistory = []; // Array of timestamps for manual generation events
+let pressedKeys = new Set(); // Track which keys are currently pressed
 
 // Game state
 let gameState = {
@@ -239,12 +240,55 @@ function getGeneratorProduction(generatorId) {
     return (gen.bots || 0) * 0.1 * (gen.efficiency || 1.0);
 }
 
+// Mobile menu state
+let mobileMenuOpen = false;
+
+// Toggle mobile menu
+function toggleMobileMenu() {
+    mobileMenuOpen = !mobileMenuOpen;
+    const sidebar = document.getElementById('left-sidebar-container');
+    const overlay = document.getElementById('mobile-overlay');
+    
+    if (sidebar) {
+        if (mobileMenuOpen) {
+            sidebar.classList.add('mobile-open');
+        } else {
+            sidebar.classList.remove('mobile-open');
+        }
+    }
+    
+    if (overlay) {
+        if (mobileMenuOpen) {
+            overlay.classList.add('active');
+        } else {
+            overlay.classList.remove('active');
+        }
+    }
+}
+
+// Close mobile menu
+function closeMobileMenu() {
+    if (mobileMenuOpen) {
+        mobileMenuOpen = false;
+        const sidebar = document.getElementById('left-sidebar-container');
+        const overlay = document.getElementById('mobile-overlay');
+        
+        if (sidebar) {
+            sidebar.classList.remove('mobile-open');
+        }
+        if (overlay) {
+            overlay.classList.remove('active');
+        }
+    }
+}
+
 // Initialize the app
 function init() {
     loadSettings();
     loadGameState();
     renderServerSidebar();
     setupChannelItems();
+    setupMobileMenu();
     loadServer(currentServer);
     updateCurrencyDisplay();
     
@@ -318,17 +362,29 @@ function getTotalMessagesPerSecond() {
 
 // Update currency display
 function updateCurrencyDisplay() {
+    const totalMessages = gameState.messages + (gameState.fractionalMessages || 0);
+    const msgPerSec = getTotalMessagesPerSecond();
+    
+    // Desktop currency display (in sidebar)
     const currencyValue = document.getElementById('currency-value');
     if (currencyValue) {
-        const totalMessages = gameState.messages + (gameState.fractionalMessages || 0);
         currencyValue.textContent = formatNumber(totalMessages, 2);
     }
     
-    // Update messages per second display (update more frequently for smooth rate tracking)
     const currencyRate = document.getElementById('currency-rate');
     if (currencyRate) {
-        const msgPerSec = getTotalMessagesPerSecond();
         currencyRate.textContent = `${formatNumber(msgPerSec, 2)} msg/s`;
+    }
+    
+    // Mobile currency display (in header)
+    const mobileCurrencyValue = document.getElementById('mobile-currency-value');
+    if (mobileCurrencyValue) {
+        mobileCurrencyValue.textContent = formatNumber(totalMessages, 2);
+    }
+    
+    const mobileCurrencyRate = document.getElementById('mobile-currency-rate');
+    if (mobileCurrencyRate) {
+        mobileCurrencyRate.textContent = `${formatNumber(msgPerSec, 2)} msg/s`;
     }
 }
 
@@ -372,9 +428,32 @@ function setupServerIcons() {
             const serverId = icon.dataset.server;
             if (serverId) {
                 loadServer(serverId);
+                // Close mobile menu on mobile after selecting server
+                if (window.innerWidth <= 768) {
+                    closeMobileMenu();
+                }
             }
         });
     });
+}
+
+// Setup mobile menu
+function setupMobileMenu() {
+    const menuButton = document.getElementById('mobile-menu-button');
+    const overlay = document.getElementById('mobile-overlay');
+    
+    if (menuButton) {
+        menuButton.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleMobileMenu();
+        });
+    }
+    
+    if (overlay) {
+        overlay.addEventListener('click', () => {
+            closeMobileMenu();
+        });
+    }
 }
 
 // Setup channel item click handlers
@@ -385,6 +464,10 @@ function setupChannelItems() {
             const channelId = channelItem.dataset.channel;
             if (channelId) {
                 loadChannel(channelId);
+                // Close mobile menu on mobile after selecting channel
+                if (window.innerWidth <= 768) {
+                    closeMobileMenu();
+                }
             }
         }
     });
@@ -949,21 +1032,45 @@ function setupManualGeneration() {
     
     if (!input || !popupContainer) return;
     
+    // Handle input events (works better on mobile)
+    let lastInputTime = 0;
+    input.addEventListener('input', (e) => {
+        const now = Date.now();
+        const inputValue = input.value;
+        
+        // Only process if there's new input and enough time has passed (prevents rapid fire)
+        if (inputValue.length > 0 && now - lastInputTime > 50) {
+            lastInputTime = now;
+            
+            // Generate message for each character
+            for (let i = 0; i < inputValue.length; i++) {
+                generateMessage();
+            }
+            
+            // Clear input
+            input.value = '';
+        }
+        
+        e.preventDefault();
+    });
+    
+    // Also handle keydown for desktop (backup)
     input.addEventListener('keydown', (e) => {
         // Prevent default behavior and clear input
         e.preventDefault();
         input.value = '';
         
         // Only count printable characters (not special keys)
-        if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        // Only generate if this key wasn't already pressed (prevents key repeat)
+        if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey && !pressedKeys.has(e.key)) {
+            pressedKeys.add(e.key);
             generateMessage();
         }
     });
     
-    // Also prevent paste and other input methods
-    input.addEventListener('input', (e) => {
-        e.preventDefault();
-        input.value = '';
+    input.addEventListener('keyup', (e) => {
+        // Remove key from pressed set when released
+        pressedKeys.delete(e.key);
     });
     
     input.addEventListener('paste', (e) => {
