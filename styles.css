@@ -593,16 +593,18 @@ body {
 
 /* Upgrades */
 .upgrade-content {
-    max-width: 800px;
+    max-width: 1200px;
     margin: 0 auto;
     padding: 20px;
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
 }
 
 .upgrade-item {
     background-color: #2f3136;
     border-radius: 8px;
     padding: 20px;
-    margin-bottom: 16px;
 }
 
 .upgrade-header {
@@ -699,6 +701,60 @@ body {
 
 .upgrade-button-cost {
     font-weight: 500;
+}
+
+/* Stats Channel */
+.stats-content {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+.stats-section {
+    background-color: #2f3136;
+    border-radius: 8px;
+    padding: 24px;
+    margin-bottom: 20px;
+}
+
+.stats-section-title {
+    font-size: 20px;
+    font-weight: 600;
+    color: #fff;
+    margin: 0 0 16px 0;
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+}
+
+.stat-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px;
+    background-color: #36393f;
+    border-radius: 4px;
+}
+
+.stat-label {
+    font-size: 14px;
+    color: #b9bbbe;
+    font-weight: 500;
+}
+
+.stat-value {
+    font-size: 16px;
+    color: #fff;
+    font-weight: 600;
+}
+
+@media (max-width: 768px) {
+    .stats-grid {
+        grid-template-columns: 1fr;
+    }
 }
 
 /* Unlock Prompt */
@@ -916,6 +972,10 @@ body {
     
     .content-header {
         justify-content: space-between;
+    }
+    
+    .upgrade-content {
+        grid-template-columns: 1fr;
     }
 }
 

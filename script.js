@@ -8,22 +8,31 @@ const GENERATOR_COSTS = {
 // Manual generation tracking
 let manualGenerationHistory = []; // Array of timestamps for manual generation events
 let pressedKeys = new Set(); // Track which keys are currently pressed
+let statsUpdateInterval = null; // Interval for updating stats display
 
 // Game state
 let gameState = {
     messages: 0,
     fractionalMessages: 0, // Accumulated fractional messages
+    lifetimeMessages: 0, // Total messages ever generated (including spent)
+    playtime: 0, // Total playtime in milliseconds
+    sessionStartTime: Date.now(), // When current session started
     settings: {
         numberFormat: 'full' // 'full', 'abbreviated', 'scientific'
     },
     upgrades: {
-        manualGenerationMultiplier: 0 // Level of manual generation multiplier upgrade
+        manualGenerationMultiplier: 0, // Level of manual generation multiplier upgrade
+        autoGenerationBoost: 0, // Global boost to all generators
+        messageMultiplier: 0, // Global multiplier to all message generation
+        costEfficiency: 0 // Reduces all upgrade costs
     },
     generators: {
         unlocked: [], // Array of unlocked generator IDs
         generator1: {
             bots: 0, // Number of auto-typer bots
-            efficiency: 1.0 // Efficiency multiplier per bot
+            efficiency: 1.0, // Efficiency multiplier per bot
+            botSpeed: 0, // Bot speed upgrade level (increases msg/s per bot)
+            autoBuy: false // Auto-buy bots when affordable
         }
     }
 };
@@ -96,6 +105,7 @@ const servers = {
 
 let currentServer = 'home';
 let currentChannel = 'manual';
+let lastChannelsByServer = {}; // Track last opened channel per server (session only)
 
 // Check if a generator is unlocked
 function isGeneratorUnlocked(generatorId) {
@@ -236,8 +246,53 @@ function getGeneratorProduction(generatorId) {
     const gen = gameState.generators[generatorId];
     if (!gen) return 0;
     
-    // Each bot produces 0.1 messages per second, multiplied by efficiency
-    return (gen.bots || 0) * 0.1 * (gen.efficiency || 1.0);
+    let baseProduction = 0;
+    
+    if (generatorId === 'generator1') {
+        // Base: 1.0 msg/s per bot, +0.1 per bot speed level
+        const msgPerBot = 1.0 + ((gen.botSpeed || 0) * 0.1);
+        baseProduction = (gen.bots || 0) * msgPerBot * (gen.efficiency || 1.0);
+    }
+    
+    // Apply global auto-generation boost (compounding)
+    const boostLevel = gameState.upgrades.autoGenerationBoost || 0;
+    const boostMultiplier = Math.pow(1.1, boostLevel); // Each level multiplies by 1.1
+    
+    return baseProduction * boostMultiplier;
+}
+
+// Get global message multiplier
+function getGlobalMessageMultiplier() {
+    const multiplierLevel = gameState.upgrades.messageMultiplier || 0;
+    // Each level multiplies by 1.05 (compounding: 1.0, 1.05, 1.1025, 1.1576, ...)
+    return Math.pow(1.05, multiplierLevel);
+}
+
+// Get cost reduction multiplier
+function getCostReductionMultiplier() {
+    const efficiencyLevel = gameState.upgrades.costEfficiency || 0;
+    const reduction = Math.min(efficiencyLevel * 0.05, 0.5); // -5% per level, max 50%
+    return 1.0 - reduction;
+}
+
+// Format playtime
+function formatPlaytime(milliseconds) {
+    const totalSeconds = Math.floor(milliseconds / 1000);
+    const totalMinutes = Math.floor(totalSeconds / 60);
+    const totalHours = Math.floor(totalMinutes / 60);
+    const days = totalHours / 24;
+    
+    // If 24 hours or more, show as days with 2 decimal places
+    if (days >= 1) {
+        return `${days.toFixed(2)} Days`;
+    }
+    
+    // Otherwise show as hours:minutes:seconds
+    const hours = totalHours;
+    const minutes = totalMinutes % 60;
+    const seconds = totalSeconds % 60;
+    
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
 }
 
 // Mobile menu state
@@ -286,14 +341,29 @@ function closeMobileMenu() {
 function init() {
     loadSettings();
     loadGameState();
+    
+    // Initialize session start time if not already set
+    if (!gameState.sessionStartTime) {
+        gameState.sessionStartTime = Date.now();
+    }
+    
     renderServerSidebar();
     setupChannelItems();
     setupMobileMenu();
     loadServer(currentServer);
     updateCurrencyDisplay();
     
+    // Track last playtime update
+    let lastPlaytimeUpdate = Date.now();
+    
     // Passive generation loop (runs 10 times per second for smooth updates)
     setInterval(() => {
+        // Update playtime based on actual elapsed time
+        const currentTime = Date.now();
+        const elapsed = currentTime - lastPlaytimeUpdate;
+        gameState.playtime = (gameState.playtime || 0) + elapsed;
+        lastPlaytimeUpdate = currentTime;
+        
         let totalProduction = 0;
         
         // Calculate production from all unlocked generators
@@ -304,6 +374,10 @@ function init() {
             }
         }
         
+        // Apply global message multiplier to production
+        const globalMultiplier = getGlobalMessageMultiplier();
+        totalProduction *= globalMultiplier;
+        
         // Add production (divided by 10 since we run 10 times per second)
         if (totalProduction > 0) {
             gameState.fractionalMessages = (gameState.fractionalMessages || 0) + (totalProduction / 10);
@@ -312,7 +386,20 @@ function init() {
             const wholePart = Math.floor(gameState.fractionalMessages);
             if (wholePart > 0) {
                 gameState.messages += wholePart;
+                gameState.lifetimeMessages = (gameState.lifetimeMessages || 0) + wholePart;
                 gameState.fractionalMessages -= wholePart;
+            }
+        }
+        
+        // Auto-buy bots if enabled
+        if (isGeneratorUnlocked('generator1')) {
+            const gen = gameState.generators.generator1;
+            if (gen && gen.autoBuy) {
+                const totalMessages = gameState.messages + (gameState.fractionalMessages || 0);
+                const botCost = Math.floor(getBotCost(gen.bots || 0) * getCostReductionMultiplier());
+                if (totalMessages >= botCost) {
+                    purchaseBot('generator1');
+                }
             }
         }
         
@@ -337,16 +424,18 @@ function getManualGenerationRate() {
     }
     
     // Calculate rate: number of events in window / window duration in seconds
-    const multiplier = getManualGenerationMultiplier();
+    // Only include manual multiplier here, global multiplier is applied separately
+    const manualMultiplier = getManualGenerationMultiplier();
+    const globalMultiplier = getGlobalMessageMultiplier();
     const eventsPerSecond = manualGenerationHistory.length / (windowMs / 1000);
-    return eventsPerSecond * multiplier;
+    return eventsPerSecond * manualMultiplier * globalMultiplier;
 }
 
 // Get total messages per second (including manual generation)
 function getTotalMessagesPerSecond() {
     let total = 0;
     
-    // Add generator production
+    // Add generator production (already includes auto-generation boost)
     const generatorOrder = ['generator1', 'generator2', 'generator3'];
     for (const genId of generatorOrder) {
         if (isGeneratorUnlocked(genId)) {
@@ -354,7 +443,11 @@ function getTotalMessagesPerSecond() {
         }
     }
     
-    // Add actual manual generation rate
+    // Apply global message multiplier to generator production
+    const globalMultiplier = getGlobalMessageMultiplier();
+    total *= globalMultiplier;
+    
+    // Add actual manual generation rate (already includes both multipliers)
     total += getManualGenerationRate();
     
     return total;
@@ -538,11 +631,23 @@ function loadServer(serverId) {
         channelList.appendChild(channelItem);
     });
     
-    // Load first channel if current channel doesn't exist in this server
-    if (!server.channels[currentChannel]) {
-        currentChannel = channelIds[0];
+    // Load channel: prefer saved channel for this server, then current channel, then first channel
+    let channelToLoad = null;
+    
+    // Check if we have a saved channel for this server
+    if (lastChannelsByServer[serverId] && server.channels[lastChannelsByServer[serverId]]) {
+        channelToLoad = lastChannelsByServer[serverId];
+    }
+    // Otherwise, check if current channel exists in this server
+    else if (server.channels[currentChannel]) {
+        channelToLoad = currentChannel;
+    }
+    // Otherwise, use first channel
+    else {
+        channelToLoad = channelIds[0];
     }
     
+    currentChannel = channelToLoad;
     loadChannel(currentChannel);
 }
 
@@ -550,7 +655,16 @@ function loadServer(serverId) {
 function loadChannel(channelId) {
     if (!servers[currentServer] || !servers[currentServer].channels[channelId]) return;
     
+    // Clear stats update interval if switching away from stats
+    if (statsUpdateInterval && currentChannel === 'stats' && channelId !== 'stats') {
+        clearInterval(statsUpdateInterval);
+        statsUpdateInterval = null;
+    }
+    
     currentChannel = channelId;
+    
+    // Save this channel as the last opened channel for this server
+    lastChannelsByServer[currentServer] = channelId;
     const channel = servers[currentServer].channels[channelId];
     
     // Update active channel item
@@ -614,15 +728,16 @@ function loadChannel(channelId) {
         setupManualGeneration();
     } else if (channelId === 'main' && currentServer === 'generator1') {
         // Auto-Typer Bot main channel
-        const gen = gameState.generators.generator1 || { bots: 0, efficiency: 1.0 };
+        const gen = gameState.generators.generator1 || { bots: 0, efficiency: 1.0, botSpeed: 0, autoBuy: false };
         const production = getGeneratorProduction('generator1');
+        const msgPerBot = 1.0 + ((gen.botSpeed || 0) * 0.1);
         const totalMessages = gameState.messages + (gameState.fractionalMessages || 0);
         
         contentBody.innerHTML = `
             <div class="generator-content">
                 <div class="generator-info">
                     <h2>Auto-Typer Bot</h2>
-                    <p>Automatically generates messages for you. Each bot produces 0.1 messages per second.</p>
+                    <p>Automatically generates messages for you. Each bot produces ${msgPerBot.toFixed(2)} messages per second.</p>
                 </div>
                 <div class="generator-stats">
                     <div class="generator-stat">
@@ -630,8 +745,16 @@ function loadChannel(channelId) {
                         <span class="stat-value">${gen.bots || 0}</span>
                     </div>
                     <div class="generator-stat">
+                        <span class="stat-label">Bot Speed:</span>
+                        <span class="stat-value">Level ${gen.botSpeed || 0}</span>
+                    </div>
+                    <div class="generator-stat">
                         <span class="stat-label">Efficiency:</span>
                         <span class="stat-value">${((gen.efficiency || 1.0) * 100).toFixed(0)}%</span>
+                    </div>
+                    <div class="generator-stat">
+                        <span class="stat-label">Auto-Buy:</span>
+                        <span class="stat-value">${gen.autoBuy ? 'Enabled' : 'Disabled'}</span>
                     </div>
                     <div class="generator-stat">
                         <span class="stat-label">Production Rate:</span>
@@ -642,12 +765,16 @@ function loadChannel(channelId) {
         `;
     } else if (channelId === 'upgrades' && currentServer === 'generator1') {
         // Auto-Typer Bot upgrades
-        const gen = gameState.generators.generator1 || { bots: 0, efficiency: 1.0 };
-        const botCost = getBotCost(gen.bots || 0);
-        const efficiencyCost = getEfficiencyUpgradeCost(gen.efficiency || 1.0);
+        const gen = gameState.generators.generator1 || { bots: 0, efficiency: 1.0, botSpeed: 0, autoBuy: false };
+        const botCost = Math.floor(getBotCost(gen.bots || 0) * getCostReductionMultiplier());
+        const efficiencyCost = Math.floor(getEfficiencyUpgradeCost(gen.efficiency || 1.0) * getCostReductionMultiplier());
+        const botSpeedCost = Math.floor(getBotSpeedCost(gen.botSpeed || 0) * getCostReductionMultiplier());
+        const autoBuyCost = 5000;
         const totalMessages = gameState.messages + (gameState.fractionalMessages || 0);
         const canAffordBot = totalMessages >= botCost;
         const canAffordEfficiency = totalMessages >= efficiencyCost;
+        const canAffordBotSpeed = totalMessages >= botSpeedCost;
+        const canAffordAutoBuy = totalMessages >= autoBuyCost && !gen.autoBuy;
         
         contentBody.innerHTML = `
             <div class="upgrade-content">
@@ -655,7 +782,7 @@ function loadChannel(channelId) {
                     <div class="upgrade-header">
                         <h3 class="upgrade-title">Buy Auto-Typer Bot</h3>
                     </div>
-                    <p class="upgrade-description">Purchase a new bot to automatically generate messages. Each bot produces 0.1 messages per second.</p>
+                    <p class="upgrade-description">Purchase a new bot to automatically generate messages. Each bot produces 1.0 messages per second.</p>
                     <div class="upgrade-stats">
                         <div class="upgrade-stat">
                             <span class="stat-label">Current Bots:</span>
@@ -684,6 +811,47 @@ function loadChannel(channelId) {
                         <span class="upgrade-button-cost">${formatNumber(efficiencyCost, 2)} Messages</span>
                     </button>
                 </div>
+                
+                <div class="upgrade-item">
+                    <div class="upgrade-header">
+                        <h3 class="upgrade-title">Bot Speed</h3>
+                        <div class="upgrade-level">Level ${gen.botSpeed || 0}</div>
+                    </div>
+                    <p class="upgrade-description">Increases the base messages per second each bot produces by 0.1 per level.</p>
+                    <div class="upgrade-stats">
+                        <div class="upgrade-stat">
+                            <span class="stat-label">Current Speed:</span>
+                            <span class="stat-value">${(1.0 + ((gen.botSpeed || 0) * 0.1)).toFixed(2)} msg/s per bot</span>
+                        </div>
+                    </div>
+                    <button class="upgrade-button ${canAffordBotSpeed ? '' : 'disabled'}" id="upgrade-bot-speed" ${!canAffordBotSpeed ? 'disabled' : ''}>
+                        <span class="upgrade-button-text">Upgrade Bot Speed</span>
+                        <span class="upgrade-button-cost">${formatNumber(botSpeedCost, 2)} Messages</span>
+                    </button>
+                </div>
+                
+                <div class="upgrade-item">
+                    <div class="upgrade-header">
+                        <h3 class="upgrade-title">Auto-Buy Bots</h3>
+                    </div>
+                    <p class="upgrade-description">Automatically purchase bots when you have enough messages. Can be toggled on/off.</p>
+                    <div class="upgrade-stats">
+                        <div class="upgrade-stat">
+                            <span class="stat-label">Status:</span>
+                            <span class="stat-value">${gen.autoBuy ? 'Enabled' : 'Disabled'}</span>
+                        </div>
+                    </div>
+                    ${gen.autoBuy ? `
+                        <button class="upgrade-button" id="toggle-auto-buy">
+                            <span class="upgrade-button-text">Disable Auto-Buy</span>
+                        </button>
+                    ` : `
+                        <button class="upgrade-button ${canAffordAutoBuy ? '' : 'disabled'}" id="buy-auto-buy" ${!canAffordAutoBuy ? 'disabled' : ''}>
+                            <span class="upgrade-button-text">Enable Auto-Buy</span>
+                            <span class="upgrade-button-cost">${formatNumber(autoBuyCost, 2)} Messages</span>
+                        </button>
+                    `}
+                </div>
             </div>
         `;
         
@@ -701,12 +869,47 @@ function loadChannel(channelId) {
                 upgradeBotEfficiency('generator1');
             });
         }
+        
+        const upgradeBotSpeedBtn = document.getElementById('upgrade-bot-speed');
+        if (upgradeBotSpeedBtn) {
+            upgradeBotSpeedBtn.addEventListener('click', () => {
+                upgradeBotSpeed('generator1');
+            });
+        }
+        
+        const buyAutoBuyBtn = document.getElementById('buy-auto-buy');
+        if (buyAutoBuyBtn) {
+            buyAutoBuyBtn.addEventListener('click', () => {
+                purchaseAutoBuy('generator1');
+            });
+        }
+        
+        const toggleAutoBuyBtn = document.getElementById('toggle-auto-buy');
+        if (toggleAutoBuyBtn) {
+            toggleAutoBuyBtn.addEventListener('click', () => {
+                toggleAutoBuy('generator1');
+            });
+        }
     } else if (channelId === 'global1' && currentServer === 'upgrades') {
         // Global upgrades channel 1
         const multiplierLevel = gameState.upgrades.manualGenerationMultiplier || 0;
         const currentMultiplier = getManualGenerationMultiplier();
-        const upgradeCost = getManualGenerationUpgradeCost(multiplierLevel);
-        const canAfford = gameState.messages >= upgradeCost;
+        const upgradeCost = Math.floor(getManualGenerationUpgradeCost(multiplierLevel) * getCostReductionMultiplier());
+        const totalMessages = gameState.messages + (gameState.fractionalMessages || 0);
+        const canAfford = totalMessages >= upgradeCost;
+        
+        const autoBoostLevel = gameState.upgrades.autoGenerationBoost || 0;
+        const autoBoostCost = Math.floor(getAutoGenerationBoostCost(autoBoostLevel) * getCostReductionMultiplier());
+        const canAffordAutoBoost = totalMessages >= autoBoostCost;
+        
+        const messageMultiplierLevel = gameState.upgrades.messageMultiplier || 0;
+        const messageMultiplierCost = Math.floor(getMessageMultiplierCost(messageMultiplierLevel) * getCostReductionMultiplier());
+        const canAffordMessageMultiplier = totalMessages >= messageMultiplierCost;
+        
+        const costEfficiencyLevel = gameState.upgrades.costEfficiency || 0;
+        const costEfficiencyCost = Math.floor(getCostEfficiencyCost(costEfficiencyLevel) * getCostReductionMultiplier());
+        const canAffordCostEfficiency = totalMessages >= costEfficiencyCost;
+        const costReduction = Math.min(costEfficiencyLevel * 5, 50);
         
         contentBody.innerHTML = `
             <div class="upgrade-content">
@@ -728,17 +931,92 @@ function loadChannel(channelId) {
                     </div>
                     <button class="upgrade-button ${canAfford ? '' : 'disabled'}" id="buy-manual-multiplier" ${!canAfford ? 'disabled' : ''}>
                         <span class="upgrade-button-text">Purchase Upgrade</span>
-                        <span class="upgrade-button-cost">${formatNumber(upgradeCost)} Messages</span>
+                        <span class="upgrade-button-cost">${formatNumber(upgradeCost, 2)} Messages</span>
+                    </button>
+                </div>
+                
+                <div class="upgrade-item">
+                    <div class="upgrade-header">
+                        <h3 class="upgrade-title">Auto-Generation Boost</h3>
+                        <div class="upgrade-level">Level ${autoBoostLevel}</div>
+                    </div>
+                    <p class="upgrade-description">Increases all generator production by 10% per level.</p>
+                    <div class="upgrade-stats">
+                        <div class="upgrade-stat">
+                            <span class="stat-label">Current Boost:</span>
+                            <span class="stat-value">+${(autoBoostLevel * 10).toFixed(0)}%</span>
+                        </div>
+                    </div>
+                    <button class="upgrade-button ${canAffordAutoBoost ? '' : 'disabled'}" id="buy-auto-boost" ${!canAffordAutoBoost ? 'disabled' : ''}>
+                        <span class="upgrade-button-text">Purchase Upgrade</span>
+                        <span class="upgrade-button-cost">${formatNumber(autoBoostCost, 2)} Messages</span>
+                    </button>
+                </div>
+                
+                <div class="upgrade-item">
+                    <div class="upgrade-header">
+                        <h3 class="upgrade-title">Message Multiplier</h3>
+                        <div class="upgrade-level">Level ${messageMultiplierLevel}</div>
+                    </div>
+                    <p class="upgrade-description">Increases all message generation (manual and auto) by 5% per level.</p>
+                    <div class="upgrade-stats">
+                        <div class="upgrade-stat">
+                            <span class="stat-label">Current Multiplier:</span>
+                            <span class="stat-value">+${(messageMultiplierLevel * 5).toFixed(0)}%</span>
+                        </div>
+                    </div>
+                    <button class="upgrade-button ${canAffordMessageMultiplier ? '' : 'disabled'}" id="buy-message-multiplier" ${!canAffordMessageMultiplier ? 'disabled' : ''}>
+                        <span class="upgrade-button-text">Purchase Upgrade</span>
+                        <span class="upgrade-button-cost">${formatNumber(messageMultiplierCost, 2)} Messages</span>
+                    </button>
+                </div>
+                
+                <div class="upgrade-item">
+                    <div class="upgrade-header">
+                        <h3 class="upgrade-title">Cost Efficiency</h3>
+                        <div class="upgrade-level">Level ${costEfficiencyLevel}</div>
+                    </div>
+                    <p class="upgrade-description">Reduces all upgrade costs by 5% per level (max 50% reduction).</p>
+                    <div class="upgrade-stats">
+                        <div class="upgrade-stat">
+                            <span class="stat-label">Current Reduction:</span>
+                            <span class="stat-value">-${costReduction.toFixed(0)}%</span>
+                        </div>
+                    </div>
+                    <button class="upgrade-button ${canAffordCostEfficiency ? '' : 'disabled'}" id="buy-cost-efficiency" ${!canAffordCostEfficiency ? 'disabled' : ''}>
+                        <span class="upgrade-button-text">Purchase Upgrade</span>
+                        <span class="upgrade-button-cost">${formatNumber(costEfficiencyCost, 2)} Messages</span>
                     </button>
                 </div>
             </div>
         `;
         
-        // Setup upgrade purchase handler
-        const buyButton = document.getElementById('buy-manual-multiplier');
-        if (buyButton) {
-            buyButton.addEventListener('click', () => {
+        // Setup upgrade purchase handlers
+        const buyManualButton = document.getElementById('buy-manual-multiplier');
+        if (buyManualButton) {
+            buyManualButton.addEventListener('click', () => {
                 purchaseManualGenerationUpgrade();
+            });
+        }
+        
+        const buyAutoBoostButton = document.getElementById('buy-auto-boost');
+        if (buyAutoBoostButton) {
+            buyAutoBoostButton.addEventListener('click', () => {
+                purchaseAutoGenerationBoost();
+            });
+        }
+        
+        const buyMessageMultiplierButton = document.getElementById('buy-message-multiplier');
+        if (buyMessageMultiplierButton) {
+            buyMessageMultiplierButton.addEventListener('click', () => {
+                purchaseMessageMultiplier();
+            });
+        }
+        
+        const buyCostEfficiencyButton = document.getElementById('buy-cost-efficiency');
+        if (buyCostEfficiencyButton) {
+            buyCostEfficiencyButton.addEventListener('click', () => {
+                purchaseCostEfficiency();
             });
         }
     } else if (channelId === 'general' && currentServer === 'settings') {
@@ -790,6 +1068,132 @@ function loadChannel(channelId) {
                 </div>
             </div>
         `;
+    } else if (channelId === 'stats' && currentServer === 'home') {
+        // Stats channel
+        const totalMessages = gameState.messages + (gameState.fractionalMessages || 0);
+        const lifetimeMessages = gameState.lifetimeMessages || 0;
+        const playtime = formatPlaytime(gameState.playtime || 0);
+        const msgPerSecond = getTotalMessagesPerSecond();
+        
+        // Get upgrade buffs (compounding multipliers)
+        const manualGenLevel = gameState.upgrades.manualGenerationMultiplier || 0;
+        const manualGenMultiplier = getManualGenerationMultiplier();
+        const manualGenBuff = ((manualGenMultiplier - 1.0) * 100).toFixed(1);
+        
+        const autoBoostLevel = gameState.upgrades.autoGenerationBoost || 0;
+        const autoBoostMultiplier = Math.pow(1.1, autoBoostLevel);
+        const autoBoostBuff = ((autoBoostMultiplier - 1.0) * 100).toFixed(1);
+        
+        const messageMultiplierLevel = gameState.upgrades.messageMultiplier || 0;
+        const messageMultiplierMultiplier = getGlobalMessageMultiplier();
+        const messageMultiplierBuff = ((messageMultiplierMultiplier - 1.0) * 100).toFixed(1);
+        
+        const costEfficiencyLevel = gameState.upgrades.costEfficiency || 0;
+        const costEfficiencyBuff = Math.min(costEfficiencyLevel * 5, 50).toFixed(0);
+        
+        // Generator stats
+        let generatorStatsHtml = '';
+        if (isGeneratorUnlocked('generator1')) {
+            const gen = gameState.generators.generator1 || {};
+            const production = getGeneratorProduction('generator1');
+            generatorStatsHtml = `
+                <div class="stats-section">
+                    <h3 class="stats-section-title">Auto-Typer Bot</h3>
+                    <div class="stats-grid">
+                        <div class="stat-item">
+                            <span class="stat-label">Active Bots:</span>
+                            <span class="stat-value">${gen.bots || 0}</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Bot Speed:</span>
+                            <span class="stat-value">Level ${gen.botSpeed || 0}</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Efficiency:</span>
+                            <span class="stat-value">${((gen.efficiency || 1.0) * 100).toFixed(0)}%</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Production Rate:</span>
+                            <span class="stat-value">${formatNumber(production, 2)} msg/s</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        contentBody.innerHTML = `
+            <div class="stats-content">
+                <div class="stats-section">
+                    <h3 class="stats-section-title">General Statistics</h3>
+                    <div class="stats-grid">
+                        <div class="stat-item">
+                            <span class="stat-label">Current Messages:</span>
+                            <span class="stat-value">${formatNumber(totalMessages, 2)}</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Lifetime Messages:</span>
+                            <span class="stat-value">${formatNumber(lifetimeMessages, 2)}</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Messages per Second:</span>
+                            <span class="stat-value">${formatNumber(msgPerSecond, 2)} msg/s</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Playtime:</span>
+                            <span class="stat-value" id="playtime-display">${playtime}</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="stats-section">
+                    <h3 class="stats-section-title">Active Upgrades</h3>
+                    <div class="stats-grid">
+                        ${manualGenLevel > 0 ? `
+                        <div class="stat-item">
+                            <span class="stat-label">Manual Generation:</span>
+                            <span class="stat-value">+${manualGenBuff}%</span>
+                        </div>
+                        ` : ''}
+                        ${autoBoostLevel > 0 ? `
+                        <div class="stat-item">
+                            <span class="stat-label">Auto-Generation Boost:</span>
+                            <span class="stat-value">+${autoBoostBuff}%</span>
+                        </div>
+                        ` : ''}
+                        ${messageMultiplierLevel > 0 ? `
+                        <div class="stat-item">
+                            <span class="stat-label">Message Multiplier:</span>
+                            <span class="stat-value">+${messageMultiplierBuff}%</span>
+                        </div>
+                        ` : ''}
+                        ${costEfficiencyLevel > 0 ? `
+                        <div class="stat-item">
+                            <span class="stat-label">Cost Efficiency:</span>
+                            <span class="stat-value">-${costEfficiencyBuff}%</span>
+                        </div>
+                        ` : ''}
+                        ${manualGenLevel === 0 && autoBoostLevel === 0 && messageMultiplierLevel === 0 && costEfficiencyLevel === 0 ? `
+                        <div class="stat-item">
+                            <span class="stat-label" style="color: #72767d;">No active upgrades</span>
+                        </div>
+                        ` : ''}
+                    </div>
+                </div>
+                
+                ${generatorStatsHtml}
+            </div>
+        `;
+        
+        // Update playtime display every second
+        if (statsUpdateInterval) {
+            clearInterval(statsUpdateInterval);
+        }
+        statsUpdateInterval = setInterval(() => {
+            const playtimeDisplay = document.getElementById('playtime-display');
+            if (playtimeDisplay) {
+                playtimeDisplay.textContent = formatPlaytime(gameState.playtime || 0);
+            }
+        }, 1000);
     } else {
         contentBody.innerHTML = `
             <div class="welcome-message">
@@ -856,6 +1260,18 @@ function loadGameState() {
             if (gameState.fractionalMessages === undefined) {
                 gameState.fractionalMessages = 0;
             }
+            // Ensure lifetimeMessages exists
+            if (gameState.lifetimeMessages === undefined) {
+                gameState.lifetimeMessages = gameState.messages || 0;
+            }
+            // Ensure playtime exists
+            if (gameState.playtime === undefined) {
+                gameState.playtime = 0;
+            }
+            // Ensure sessionStartTime exists
+            if (!gameState.sessionStartTime) {
+                gameState.sessionStartTime = Date.now();
+            }
             // Ensure generators exist
             if (!gameState.generators) {
                 gameState.generators = { unlocked: [] };
@@ -865,7 +1281,16 @@ function loadGameState() {
             }
             // Initialize generator1 if unlocked
             if (isGeneratorUnlocked('generator1') && !gameState.generators.generator1) {
-                gameState.generators.generator1 = { bots: 0, efficiency: 1.0 };
+                gameState.generators.generator1 = { bots: 0, efficiency: 1.0, botSpeed: 0, autoBuy: false };
+            }
+            // Ensure generator1 has all properties
+            if (gameState.generators.generator1) {
+                if (gameState.generators.generator1.botSpeed === undefined) {
+                    gameState.generators.generator1.botSpeed = 0;
+                }
+                if (gameState.generators.generator1.autoBuy === undefined) {
+                    gameState.generators.generator1.autoBuy = false;
+                }
             }
         } catch (e) {
             console.error('Failed to load game state:', e);
@@ -918,15 +1343,39 @@ function showUnlockPrompt(generatorId) {
 
 // Get bot cost (increases with each bot)
 function getBotCost(currentBots) {
-    // First bot costs 1000, each additional bot costs 1.5x more
-    return Math.floor(1000 * Math.pow(1.5, currentBots));
+    // Fixed cost per bot (doesn't increase)
+    return 1000;
 }
 
 // Get efficiency upgrade cost
 function getEfficiencyUpgradeCost(currentEfficiency) {
-    // Each upgrade increases efficiency by 10%, cost increases exponentially
+    // Each upgrade increases efficiency by 10%, cost increases more slowly
     const level = Math.floor((currentEfficiency - 1.0) / 0.1);
-    return Math.floor(1000 * Math.pow(1.5, level));
+    return Math.floor(500 * Math.pow(1.2, level));
+}
+
+// Get bot speed upgrade cost
+function getBotSpeedCost(currentLevel) {
+    // Base cost 250, increases more slowly (1.2x per level)
+    return Math.floor(250 * Math.pow(1.2, currentLevel));
+}
+
+// Get auto-generation boost cost
+function getAutoGenerationBoostCost(currentLevel) {
+    // Base cost 500, increases more slowly (1.2x per level)
+    return Math.floor(500 * Math.pow(1.2, currentLevel));
+}
+
+// Get message multiplier cost
+function getMessageMultiplierCost(currentLevel) {
+    // Base cost 1000, increases more slowly (1.2x per level)
+    return Math.floor(1000 * Math.pow(1.2, currentLevel));
+}
+
+// Get cost efficiency cost
+function getCostEfficiencyCost(currentLevel) {
+    // Base cost 2000, increases more slowly (1.2x per level)
+    return Math.floor(2000 * Math.pow(1.2, currentLevel));
 }
 
 // Purchase a bot
@@ -936,7 +1385,7 @@ function purchaseBot(generatorId) {
     const gen = gameState.generators[generatorId];
     if (!gen) return;
     
-    const cost = getBotCost(gen.bots || 0);
+    const cost = Math.floor(getBotCost(gen.bots || 0) * getCostReductionMultiplier());
     const totalMessages = gameState.messages + (gameState.fractionalMessages || 0);
     
     if (totalMessages >= cost) {
@@ -963,7 +1412,7 @@ function upgradeBotEfficiency(generatorId) {
     const gen = gameState.generators[generatorId];
     if (!gen) return;
     
-    const cost = getEfficiencyUpgradeCost(gen.efficiency || 1.0);
+    const cost = Math.floor(getEfficiencyUpgradeCost(gen.efficiency || 1.0) * getCostReductionMultiplier());
     const totalMessages = gameState.messages + (gameState.fractionalMessages || 0);
     
     if (totalMessages >= cost) {
@@ -986,8 +1435,8 @@ function upgradeBotEfficiency(generatorId) {
 // Get manual generation multiplier
 function getManualGenerationMultiplier() {
     const level = gameState.upgrades.manualGenerationMultiplier || 0;
-    // Each level gives +10% (1.0, 1.1, 1.2, 1.3, ...)
-    return 1.0 + (level * 0.1);
+    // Each level multiplies by 1.1 (compounding: 1.0, 1.1, 1.21, 1.331, ...)
+    return Math.pow(1.1, level);
 }
 
 // Get messages generated per click (average)
@@ -997,19 +1446,22 @@ function getMessagesPerClick() {
 
 // Generate a message (used by both typing and clicking)
 function generateMessage() {
-    const multiplier = getManualGenerationMultiplier();
+    const manualMultiplier = getManualGenerationMultiplier();
+    const globalMultiplier = getGlobalMessageMultiplier();
+    const totalMultiplier = manualMultiplier * globalMultiplier;
     
     // Track manual generation event
     manualGenerationHistory.push(Date.now());
     
-    // Add fractional messages
-    gameState.fractionalMessages = (gameState.fractionalMessages || 0) + multiplier;
+    // Add fractional messages (with global multiplier)
+    gameState.fractionalMessages = (gameState.fractionalMessages || 0) + totalMultiplier;
     
     // Convert whole parts to messages to prevent precision issues
     // But keep fractional part for display
     const wholePart = Math.floor(gameState.fractionalMessages);
     if (wholePart > 0) {
         gameState.messages += wholePart;
+        gameState.lifetimeMessages = (gameState.lifetimeMessages || 0) + wholePart;
         gameState.fractionalMessages -= wholePart;
     }
     
@@ -1019,7 +1471,7 @@ function generateMessage() {
     const popupContainer = document.getElementById('popup-container');
     if (popupContainer) {
         // Show the multiplier value with 1 decimal place
-        const displayText = `+${multiplier.toFixed(1)}`;
+        const displayText = `+${totalMultiplier.toFixed(1)}`;
         showPopup(popupContainer, displayText);
     }
 }
@@ -1084,11 +1536,32 @@ function setupManualGeneration() {
             e.preventDefault(); // Prevent input blur
         });
         
+        sendButton.addEventListener('touchstart', (e) => {
+            e.preventDefault(); // Prevent keyboard on mobile
+        });
+        
         sendButton.addEventListener('click', (e) => {
             e.preventDefault();
             e.stopPropagation();
+            
+            // Blur input to close keyboard on mobile
+            if (input) {
+                input.blur();
+            }
+            
             generateMessage();
-            // Don't refocus to avoid flashing
+        });
+        
+        sendButton.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            // Blur input to close keyboard on mobile
+            if (input) {
+                input.blur();
+            }
+            
+            generateMessage();
         });
     }
     
@@ -1223,7 +1696,7 @@ function setupSettingsHandlers() {
                             }
                             // Initialize generator1 if unlocked
                             if (isGeneratorUnlocked('generator1') && !gameState.generators.generator1) {
-                                gameState.generators.generator1 = { bots: 0, efficiency: 1.0 };
+                                gameState.generators.generator1 = { bots: 0, efficiency: 1.0, botSpeed: 0, autoBuy: false };
                             }
                             saveSettings();
                             updateCurrencyDisplay();
@@ -1249,15 +1722,21 @@ function setupSettingsHandlers() {
             if (confirm('Are you sure you want to reset your game? This cannot be undone!')) {
                 gameState.messages = 0;
                 gameState.fractionalMessages = 0;
+                gameState.lifetimeMessages = 0;
+                gameState.playtime = 0;
+                gameState.sessionStartTime = Date.now();
                 gameState.settings = {
                     numberFormat: 'full'
                 };
                 gameState.upgrades = {
-                    manualGenerationMultiplier: 0
+                    manualGenerationMultiplier: 0,
+                    autoGenerationBoost: 0,
+                    messageMultiplier: 0,
+                    costEfficiency: 0
                 };
                 gameState.generators = {
                     unlocked: [],
-                    generator1: { bots: 0, efficiency: 1.0 }
+                    generator1: { bots: 0, efficiency: 1.0, botSpeed: 0, autoBuy: false }
                 };
                 localStorage.removeItem('gameSettings');
                 localStorage.removeItem('gameState');
@@ -1273,18 +1752,27 @@ function setupSettingsHandlers() {
 
 // Get manual generation upgrade cost
 function getManualGenerationUpgradeCost(level) {
-    // Base cost 50, increases by 1.5x per level
-    // Level 0: 50, Level 1: 75, Level 2: 112.5, Level 3: 168.75, etc.
-    return Math.floor(50 * Math.pow(1.5, level));
+    // Base cost 50, increases more slowly (1.2x per level)
+    // Level 0: 50, Level 1: 60, Level 2: 72, Level 3: 86.4, etc.
+    return Math.floor(50 * Math.pow(1.2, level));
 }
 
 // Purchase manual generation upgrade
 function purchaseManualGenerationUpgrade() {
     const currentLevel = gameState.upgrades.manualGenerationMultiplier || 0;
-    const cost = getManualGenerationUpgradeCost(currentLevel);
+    const cost = Math.floor(getManualGenerationUpgradeCost(currentLevel) * getCostReductionMultiplier());
+    const totalMessages = gameState.messages + (gameState.fractionalMessages || 0);
     
-    if (gameState.messages >= cost) {
-        gameState.messages -= cost;
+    if (totalMessages >= cost) {
+        // Deduct cost
+        if (gameState.fractionalMessages >= cost) {
+            gameState.fractionalMessages -= cost;
+        } else {
+            const remaining = cost - gameState.fractionalMessages;
+            gameState.fractionalMessages = 0;
+            gameState.messages -= remaining;
+        }
+        
         gameState.upgrades.manualGenerationMultiplier = (gameState.upgrades.manualGenerationMultiplier || 0) + 1;
         autoSave();
         updateCurrencyDisplay();
@@ -1292,6 +1780,142 @@ function purchaseManualGenerationUpgrade() {
         // Reload the channel to update the UI
         loadChannel(currentChannel);
     }
+}
+
+// Purchase auto-generation boost
+function purchaseAutoGenerationBoost() {
+    const currentLevel = gameState.upgrades.autoGenerationBoost || 0;
+    const cost = Math.floor(getAutoGenerationBoostCost(currentLevel) * getCostReductionMultiplier());
+    const totalMessages = gameState.messages + (gameState.fractionalMessages || 0);
+    
+    if (totalMessages >= cost) {
+        // Deduct cost
+        if (gameState.fractionalMessages >= cost) {
+            gameState.fractionalMessages -= cost;
+        } else {
+            const remaining = cost - gameState.fractionalMessages;
+            gameState.fractionalMessages = 0;
+            gameState.messages -= remaining;
+        }
+        
+        gameState.upgrades.autoGenerationBoost = (gameState.upgrades.autoGenerationBoost || 0) + 1;
+        autoSave();
+        updateCurrencyDisplay();
+        loadChannel(currentChannel);
+    }
+}
+
+// Purchase message multiplier
+function purchaseMessageMultiplier() {
+    const currentLevel = gameState.upgrades.messageMultiplier || 0;
+    const cost = Math.floor(getMessageMultiplierCost(currentLevel) * getCostReductionMultiplier());
+    const totalMessages = gameState.messages + (gameState.fractionalMessages || 0);
+    
+    if (totalMessages >= cost) {
+        // Deduct cost
+        if (gameState.fractionalMessages >= cost) {
+            gameState.fractionalMessages -= cost;
+        } else {
+            const remaining = cost - gameState.fractionalMessages;
+            gameState.fractionalMessages = 0;
+            gameState.messages -= remaining;
+        }
+        
+        gameState.upgrades.messageMultiplier = (gameState.upgrades.messageMultiplier || 0) + 1;
+        autoSave();
+        updateCurrencyDisplay();
+        loadChannel(currentChannel);
+    }
+}
+
+// Purchase cost efficiency
+function purchaseCostEfficiency() {
+    const currentLevel = gameState.upgrades.costEfficiency || 0;
+    const cost = Math.floor(getCostEfficiencyCost(currentLevel) * getCostReductionMultiplier());
+    const totalMessages = gameState.messages + (gameState.fractionalMessages || 0);
+    
+    if (totalMessages >= cost) {
+        // Deduct cost
+        if (gameState.fractionalMessages >= cost) {
+            gameState.fractionalMessages -= cost;
+        } else {
+            const remaining = cost - gameState.fractionalMessages;
+            gameState.fractionalMessages = 0;
+            gameState.messages -= remaining;
+        }
+        
+        gameState.upgrades.costEfficiency = (gameState.upgrades.costEfficiency || 0) + 1;
+        autoSave();
+        updateCurrencyDisplay();
+        loadChannel(currentChannel);
+    }
+}
+
+// Upgrade bot speed
+function upgradeBotSpeed(generatorId) {
+    if (!isGeneratorUnlocked(generatorId)) return;
+    
+    const gen = gameState.generators[generatorId];
+    if (!gen) return;
+    
+    const currentLevel = gen.botSpeed || 0;
+    const cost = Math.floor(getBotSpeedCost(currentLevel) * getCostReductionMultiplier());
+    const totalMessages = gameState.messages + (gameState.fractionalMessages || 0);
+    
+    if (totalMessages >= cost) {
+        // Deduct cost
+        if (gameState.fractionalMessages >= cost) {
+            gameState.fractionalMessages -= cost;
+        } else {
+            const remaining = cost - gameState.fractionalMessages;
+            gameState.fractionalMessages = 0;
+            gameState.messages -= remaining;
+        }
+        
+        gen.botSpeed = (gen.botSpeed || 0) + 1;
+        autoSave();
+        updateCurrencyDisplay();
+        loadChannel(currentChannel);
+    }
+}
+
+// Purchase auto-buy
+function purchaseAutoBuy(generatorId) {
+    if (!isGeneratorUnlocked(generatorId)) return;
+    
+    const gen = gameState.generators[generatorId];
+    if (!gen || gen.autoBuy) return;
+    
+    const cost = 5000;
+    const totalMessages = gameState.messages + (gameState.fractionalMessages || 0);
+    
+    if (totalMessages >= cost) {
+        // Deduct cost
+        if (gameState.fractionalMessages >= cost) {
+            gameState.fractionalMessages -= cost;
+        } else {
+            const remaining = cost - gameState.fractionalMessages;
+            gameState.fractionalMessages = 0;
+            gameState.messages -= remaining;
+        }
+        
+        gen.autoBuy = true;
+        autoSave();
+        updateCurrencyDisplay();
+        loadChannel(currentChannel);
+    }
+}
+
+// Toggle auto-buy
+function toggleAutoBuy(generatorId) {
+    if (!isGeneratorUnlocked(generatorId)) return;
+    
+    const gen = gameState.generators[generatorId];
+    if (!gen) return;
+    
+    gen.autoBuy = !gen.autoBuy;
+    autoSave();
+    loadChannel(currentChannel);
 }
 
 // Initialize on page load
