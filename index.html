@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Idle Chat</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Left Sidebar Container -->
+        <div class="left-sidebar-container">
+            <!-- Server List Sidebar -->
+            <div class="server-sidebar" id="server-sidebar">
+                <!-- Servers will be dynamically rendered here -->
+            </div>
+
+            <!-- Channel Sidebar -->
+            <div class="channel-sidebar">
+                <div class="channel-header">
+                    <h2 id="server-name">Home</h2>
+                </div>
+                <div class="channel-list" id="channel-list">
+                    <div class="channel-item active" data-channel="manual">
+                        <span>manual-generation</span>
+                    </div>
+                    <div class="channel-item" data-channel="stats">
+                        <span>stats</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Currency Panel (spans both sidebars) -->
+            <div class="currency-panel">
+                <div class="currency-display">
+                    <svg class="currency-icon" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/>
+                    </svg>
+                    <div class="currency-content">
+                        <div class="currency-value" id="currency-value">123,456</div>
+                        <div class="currency-label-row">
+                            <div class="currency-label">Messages</div>
+                            <div class="currency-rate" id="currency-rate">0.00 msg/s</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content Area -->
+        <div class="main-content">
+            <div class="content-header">
+                <div class="channel-title">
+                    <span id="current-channel">manual-generation</span>
+                </div>
+            </div>
+            <div class="content-body" id="content-body">
+                <div class="welcome-message">
+                    <h1>Welcome to Idle Chat!</h1>
+                    <p>Click on different servers in the left sidebar to navigate between generators and upgrades.</p>
+                    <p>Use the channels to access different game features.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
+
