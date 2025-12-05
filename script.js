@@ -1486,16 +1486,24 @@ function setupManualGeneration() {
     
     // Handle input events (works better on mobile)
     let lastInputTime = 0;
+    let isPasting = false;
     input.addEventListener('input', (e) => {
         const now = Date.now();
         const inputValue = input.value;
+        
+        // If pasting, only generate 1 message (handled in paste event)
+        if (isPasting) {
+            input.value = '';
+            e.preventDefault();
+            return;
+        }
         
         // Only process if there's new input and enough time has passed (prevents rapid fire)
         if (inputValue.length > 0 && now - lastInputTime > 50) {
             lastInputTime = now;
             
-            // Generate message for each character
-            for (let i = 0; i < inputValue.length; i++) {
+            // Limit to 1 character per input event to prevent paste lag
+            if (inputValue.length === 1) {
                 generateMessage();
             }
             
@@ -1527,7 +1535,18 @@ function setupManualGeneration() {
     
     input.addEventListener('paste', (e) => {
         e.preventDefault();
+        isPasting = true;
+        
+        // Paste only generates 1 message (game is about typing, not pasting)
+        generateMessage();
+        
+        // Clear input
         input.value = '';
+        
+        // Reset paste flag after a short delay
+        setTimeout(() => {
+            isPasting = false;
+        }, 100);
     });
     
     // Send button click handler
