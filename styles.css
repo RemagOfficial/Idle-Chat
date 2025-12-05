@@ -9,13 +9,17 @@ body {
     background-color: #36393f;
     color: #dcddde;
     height: 100vh;
+    height: 100dvh; /* Dynamic viewport height for mobile */
     overflow: hidden;
+    padding-top: env(safe-area-inset-top);
 }
 
 .app-container {
     display: flex;
     height: 100vh;
+    height: 100dvh; /* Dynamic viewport height for mobile */
     width: 100vw;
+    width: 100dvw; /* Dynamic viewport width for mobile */
 }
 
 /* Left Sidebar Container */
@@ -238,6 +242,9 @@ body {
     gap: 12px;
     box-shadow: 0 1px 0 rgba(4, 4, 5, 0.2), 0 1.5px 0 rgba(6, 6, 7, 0.05), 0 2px 0 rgba(4, 4, 5, 0.05);
     z-index: 1;
+    position: sticky;
+    top: 0;
+    background-color: #36393f;
 }
 
 .mobile-currency-display {
@@ -833,6 +840,14 @@ body {
 
 /* Responsive adjustments */
 @media (max-width: 768px) {
+    body {
+        padding-top: max(env(safe-area-inset-top), 8px);
+    }
+    
+    .app-container {
+        padding-top: env(safe-area-inset-top);
+    }
+    
     .mobile-menu-button {
         display: block;
     }
@@ -840,7 +855,7 @@ body {
     .left-sidebar-container {
         position: fixed;
         left: 0;
-        top: 0;
+        top: env(safe-area-inset-top);
         bottom: 0;
         z-index: 999;
         transform: translateX(-100%);
