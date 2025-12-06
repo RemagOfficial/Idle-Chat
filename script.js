@@ -1,7 +1,7 @@
 // Generator unlock costs
 const GENERATOR_COSTS = {
     generator1: 1000,
-    generator2: 1000,
+    generator2: 10000, // 10x generator1
     generator3: 10000
 };
 
@@ -37,7 +37,16 @@ let gameState = {
             botSpeed: 0, // Bot speed upgrade level (increases msg/s per bot)
             autoBuy: false, // Auto-buy bots when affordable
             autoBuyPurchased: false, // Whether auto-buy has been purchased
-            autoBuyDelayLevel: 0 // Level of auto-buy delay reduction upgrade
+            autoBuyDelayLevel: 0, // Level of auto-buy delay reduction upgrade
+            prestigeLevel: 0 // Number of times this generator has been prestiged
+        },
+        generator2: {
+            cascades: 0, // Number of message cascades (generates based on generator1 bots)
+            cascadeEfficiency: 0.1, // Percentage of generator1 production per cascade (10% base)
+            autoBuy: false, // Auto-buy cascades when affordable
+            autoBuyPurchased: false, // Whether auto-buy has been purchased
+            autoBuyDelayLevel: 0, // Level of auto-buy delay reduction upgrade
+            prestigeLevel: 0 // Number of times this generator has been prestiged
         }
     }
 };
@@ -94,14 +103,15 @@ const servers = {
         name: 'Auto-Typer Bot',
         locked: true,
         channels: {
-            main: { name: 'bot-control', content: 'Auto-Typer Bot control panel' },
-            upgrades: { name: 'bot-upgrades', content: 'Upgrade your bots' }
+            general: { name: 'general', content: 'Server upgrades and management' }
         }
     },
     generator2: {
-        name: 'Generator 2',
+        name: 'Message Cascade',
         locked: true,
-        channels: {}
+        channels: {
+            general: { name: 'general', content: 'Cascade upgrades and management' }
+        }
     },
     generator3: {
         name: 'Generator 3',
@@ -127,6 +137,72 @@ const servers = {
 let currentServer = 'home';
 let currentChannel = 'manual';
 let lastChannelsByServer = {}; // Track last opened channel per server (session only)
+
+// Random server names for generators
+const SERVER_NAMES = [
+    'Gaming Paradise', 'Tech Hub', 'Chill Zone', 'Gamer Central', 'Pixel Party',
+    'Digital Den', 'Code Club', 'Game Masters', 'Retro Gaming', 'Pro Gamers',
+    'Elite Squad', 'Victory Lane', 'Game Station', 'Arcade Heroes', 'Pixel Perfect',
+    'Digital Realm', 'Gaming Universe', 'The Nexus', 'Cyber Space', 'Game World',
+    'Battle Station', 'Player Hub', 'Gaming Empire', 'The Arena', 'Game Lab',
+    'Digital Domain', 'Pro League', 'Game Central', 'The Guild', 'Champions HQ'
+];
+
+// Get server name for a generator (stored name or default)
+function getGeneratorServerName(generatorId) {
+    if (!servers[generatorId]) return '';
+    
+    // Check if generator is unlocked and has a stored name
+    if (isGeneratorUnlocked(generatorId) && gameState.generators[generatorId]?.name) {
+        return gameState.generators[generatorId].name;
+    }
+    
+    // Return default name from servers object
+    return servers[generatorId].name;
+}
+
+// Assign a random server name to a generator
+function assignRandomServerName(generatorId) {
+    // Initialize generator object if it doesn't exist (for preview names)
+    if (!gameState.generators[generatorId]) {
+        gameState.generators[generatorId] = {};
+    }
+    
+    const gen = gameState.generators[generatorId];
+    if (!gen) return;
+    
+    // Only assign if it doesn't already have a name (preserves preview name)
+    if (!gen.name) {
+        // Get names already used to avoid duplicates
+        const usedNames = new Set();
+        ['generator1', 'generator2', 'generator3'].forEach(genId => {
+            if (genId !== generatorId && gameState.generators[genId]?.name) {
+                usedNames.add(gameState.generators[genId].name);
+            }
+        });
+        
+        // Get available names
+        const availableNames = SERVER_NAMES.filter(name => !usedNames.has(name));
+        
+        // Pick a random one
+        if (availableNames.length > 0) {
+            const randomIndex = Math.floor(Math.random() * availableNames.length);
+            gen.name = availableNames[randomIndex];
+        } else {
+            // Fallback if all names are used (shouldn't happen with only 3 generators)
+            gen.name = SERVER_NAMES[Math.floor(Math.random() * SERVER_NAMES.length)];
+        }
+    }
+}
+
+// Get or generate a preview name for a locked generator (stores it for later use)
+function getPreviewServerName(generatorId) {
+    // This will create the generator object and assign a name if it doesn't exist
+    assignRandomServerName(generatorId);
+    
+    // Return the name (will be generated if it doesn't exist)
+    return gameState.generators[generatorId]?.name || servers[generatorId].name;
+}
 
 // Check if a generator is unlocked
 function isGeneratorUnlocked(generatorId) {
@@ -173,8 +249,8 @@ function renderServerSidebar() {
         const isNextLocked = !foundNextLocked && !isUnlocked;
         
         if (isUnlocked || isNextLocked) {
-            const server = servers[genId];
-            const icon = createServerIcon(genId, server.name.charAt(0).toUpperCase(), false, !isUnlocked);
+            const serverName = getGeneratorServerName(genId);
+            const icon = createServerIcon(genId, serverName.charAt(0).toUpperCase(), false, !isUnlocked);
             sidebar.appendChild(icon);
             
             if (isNextLocked) {
@@ -245,6 +321,9 @@ function unlockGenerator(generatorId) {
         // Unlock generator
         gameState.generators.unlocked.push(generatorId);
         
+        // Preserve preview name if it exists
+        const existingName = gameState.generators[generatorId]?.name;
+        
         // Initialize generator if needed
         if (!gameState.generators[generatorId]) {
             if (generatorId === 'generator1') {
@@ -254,7 +333,17 @@ function unlockGenerator(generatorId) {
                     botSpeed: 0,
                     autoBuy: false,
                     autoBuyPurchased: false,
-                    autoBuyDelayLevel: 0
+                    autoBuyDelayLevel: 0,
+                    prestigeLevel: 0
+                };
+            } else if (generatorId === 'generator2') {
+                gameState.generators[generatorId] = {
+                    cascades: 0,
+                    cascadeEfficiency: 0.1,
+                    autoBuy: false,
+                    autoBuyPurchased: false,
+                    autoBuyDelayLevel: 0,
+                    prestigeLevel: 0
                 };
             } else {
                 gameState.generators[generatorId] = {
@@ -267,7 +356,19 @@ function unlockGenerator(generatorId) {
             if (gameState.generators[generatorId].bots === 0) {
                 gameState.generators[generatorId].bots = 1;
             }
+            // Ensure prestigeLevel exists
+            if (gameState.generators[generatorId].prestigeLevel === undefined) {
+                gameState.generators[generatorId].prestigeLevel = 0;
+            }
         }
+        
+        // Restore preview name if it existed
+        if (existingName) {
+            gameState.generators[generatorId].name = existingName;
+        }
+        
+        // Assign random server name if it doesn't have one (may already have one from preview)
+        assignRandomServerName(generatorId);
         
         autoSave();
         updateCurrencyDisplay();
@@ -290,13 +391,34 @@ function getGeneratorProduction(generatorId) {
         // Base: 1.0 msg/s per bot, multiplies by 1.1 per bot speed level (compounding)
         const msgPerBot = 1.0 * Math.pow(1.1, gen.botSpeed || 0);
         baseProduction = (gen.bots || 0) * msgPerBot * (gen.efficiency || 1.0);
+        
+        // Apply global auto-generation boost (compounding) - only for generator1
+        const boostLevel = gameState.upgrades.autoGenerationBoost || 0;
+        const boostMultiplier = Math.pow(1.1, boostLevel); // Each level multiplies by 1.1
+        return baseProduction * boostMultiplier;
+    } else if (generatorId === 'generator2') {
+        // Cascades generate messages based on generator1's production
+        // Each cascade generates 10% of generator1's base production per second
+        // We need to get generator1's production WITHOUT the global boost to avoid double-counting
+        const gen1 = gameState.generators.generator1;
+        if (!gen1 || !isGeneratorUnlocked('generator1')) return 0;
+        
+        // Calculate generator1's base production (without global auto-generation boost)
+        // Base: 1.0 msg/s per bot, multiplies by 1.1 per bot speed level (compounding)
+        const msgPerBot = 1.0 * Math.pow(1.1, gen1.botSpeed || 0);
+        const gen1BaseProduction = (gen1.bots || 0) * msgPerBot * (gen1.efficiency || 1.0);
+        
+        // Each cascade multiplies generator1's base production by cascadeEfficiency (default 0.1 = 10%)
+        const cascadeEfficiency = gen.cascadeEfficiency || 0.1;
+        baseProduction = (gen.cascades || 0) * gen1BaseProduction * cascadeEfficiency;
+        
+        // Apply global auto-generation boost to cascades too
+        const boostLevel = gameState.upgrades.autoGenerationBoost || 0;
+        const boostMultiplier = Math.pow(1.1, boostLevel);
+        return baseProduction * boostMultiplier;
     }
     
-    // Apply global auto-generation boost (compounding)
-    const boostLevel = gameState.upgrades.autoGenerationBoost || 0;
-    const boostMultiplier = Math.pow(1.1, boostLevel); // Each level multiplies by 1.1
-    
-    return baseProduction * boostMultiplier;
+    return baseProduction;
 }
 
 // Get global message multiplier
@@ -397,7 +519,8 @@ function init() {
     // Track last playtime update
     let lastPlaytimeUpdate = Date.now();
     let lastUpgradeUIUpdate = 0; // Track last upgrade UI update
-    let lastAutoBuyTime = 0; // Track last auto-buy purchase time
+    let lastAutoBuyTime = 0; // Track last auto-buy purchase time (generator1)
+    let lastGenerator2AutoBuyTime = 0; // Track last auto-buy purchase time (generator2)
     
     // Passive generation loop (runs 10 times per second for smooth updates)
     setInterval(() => {
@@ -454,7 +577,8 @@ function init() {
         updateCurrencyDisplay();
         
         // Update upgrade button states periodically if on an upgrade channel (every 500ms to avoid too frequent updates)
-        const isUpgradeChannel = (currentServer === 'generator1' && currentChannel === 'upgrades') || 
+        const isUpgradeChannel = (currentServer === 'generator1' && currentChannel === 'general') || 
+                                 (currentServer === 'generator2' && currentChannel === 'general') ||
                                  (currentServer === 'upgrades' && currentChannel === 'global1');
         if (isUpgradeChannel) {
             const now = Date.now();
@@ -515,7 +639,7 @@ function getTotalMessagesPerSecond() {
 function updateUpgradeButtonStates() {
     const totalMessages = gameState.messages + (gameState.fractionalMessages || 0);
     
-    if (currentServer === 'generator1' && currentChannel === 'upgrades') {
+    if (currentServer === 'generator1' && currentChannel === 'general') {
         // Generator 1 upgrades
         const gen = gameState.generators.generator1 || { bots: 0, efficiency: 1.0, botSpeed: 0, autoBuy: false, autoBuyPurchased: false, autoBuyDelayLevel: 0 };
         
@@ -523,7 +647,8 @@ function updateUpgradeButtonStates() {
         const buyBotBtn = document.getElementById('buy-bot');
         if (buyBotBtn) {
             const currentBots = gen.bots || 0;
-            const isMaxBots = currentBots >= GENERATOR1_MAX_LEVELS.bots;
+            const maxLevels = getGenerator1MaxLevels();
+            const isMaxBots = currentBots >= maxLevels.bots;
             if (isMaxBots) {
                 buyBotBtn.disabled = true;
                 buyBotBtn.classList.add('disabled');
@@ -546,7 +671,8 @@ function updateUpgradeButtonStates() {
         if (efficiencyBtn) {
             const currentEfficiency = gen.efficiency || 1.0;
             const currentLevel = Math.floor(Math.log(currentEfficiency / 1.0) / Math.log(1.1));
-            const isMaxLevel = currentLevel >= GENERATOR1_MAX_LEVELS.efficiency;
+            const maxLevels = getGenerator1MaxLevels();
+            const isMaxLevel = currentLevel >= maxLevels.efficiency;
             if (isMaxLevel) {
                 efficiencyBtn.disabled = true;
                 efficiencyBtn.classList.add('disabled');
@@ -566,7 +692,8 @@ function updateUpgradeButtonStates() {
         const botSpeedBtn = document.getElementById('upgrade-bot-speed');
         if (botSpeedBtn) {
             const currentLevel = gen.botSpeed || 0;
-            const isMaxLevel = currentLevel >= GENERATOR1_MAX_LEVELS.botSpeed;
+            const maxLevels = getGenerator1MaxLevels();
+            const isMaxLevel = currentLevel >= maxLevels.botSpeed;
             if (isMaxLevel) {
                 botSpeedBtn.disabled = true;
                 botSpeedBtn.classList.add('disabled');
@@ -729,6 +856,23 @@ function updateUpgradeButtonStates() {
                 if (costSpan) costSpan.textContent = `${formatNumber(autoBuyCost, 2)} Messages`;
             }
         }
+        
+        // Prestige button (always exists now)
+        const prestigeBtn = document.getElementById('prestige-generator1');
+        if (prestigeBtn) {
+            const allMaxed = isGenerator1AllMaxed();
+            const prestigeCost = getPrestigeCost('generator1');
+            const canAfford = totalMessages >= prestigeCost;
+            const shouldEnable = allMaxed && canAfford;
+            
+            prestigeBtn.disabled = !shouldEnable;
+            prestigeBtn.classList.toggle('disabled', !shouldEnable);
+            
+            const costSpan = prestigeBtn.querySelector('.upgrade-button-cost');
+            if (costSpan) {
+                costSpan.textContent = allMaxed ? `${formatNumber(prestigeCost, 2)} Messages` : 'Max All Upgrades';
+            }
+        }
     } else if (currentServer === 'upgrades' && currentChannel === 'global1') {
         // Global upgrades
         // Manual Generation Multiplier
@@ -770,7 +914,8 @@ function updateUpgradeButtonStates() {
                 if (costSpan) costSpan.textContent = `${formatNumber(autoBoostCost, 2)} Messages`;
             }
         }
-        
+    } else if (currentServer === 'upgrades' && currentChannel === 'global1') {
+        // Global upgrades
         // Message Multiplier
         const messageMultiplierBtn = document.getElementById('buy-message-multiplier');
         if (messageMultiplierBtn) {
@@ -808,6 +953,318 @@ function updateUpgradeButtonStates() {
                 costEfficiencyBtn.classList.toggle('disabled', !canAfford);
                 const costSpan = costEfficiencyBtn.querySelector('.upgrade-button-cost');
                 if (costSpan) costSpan.textContent = `${formatNumber(costEfficiencyCost, 2)} Messages`;
+            }
+        }
+    } else if (currentServer === 'generator2' && currentChannel === 'general') {
+        // Generator 2 upgrades
+        const gen2 = gameState.generators.generator2 || { cascades: 0, cascadeEfficiency: 0.1, autoBuy: false, autoBuyPurchased: false, autoBuyDelayLevel: 0 };
+        const gen1 = gameState.generators.generator1 || { bots: 0 };
+        const gen1Bots = gen1.bots || 0;
+        const hasGen1Bot = gen1Bots >= 1;
+        
+        // Get generator1 server name
+        const gen1ServerName = isGeneratorUnlocked('generator1') ? getGeneratorServerName('generator1') : 'Generator 1';
+        
+        // Buy Cascade button
+        const buyCascadeBtn = document.getElementById('buy-cascade');
+        if (buyCascadeBtn) {
+            // Always check current state (recalculate in case it changed)
+            const currentCascades = gen2.cascades || 0;
+            const maxLevels = getGenerator2MaxLevels();
+            const isMaxCascades = currentCascades >= maxLevels.cascades;
+            
+            if (isMaxCascades) {
+                buyCascadeBtn.disabled = true;
+                buyCascadeBtn.setAttribute('disabled', 'disabled');
+                buyCascadeBtn.classList.add('disabled');
+                const costSpan = buyCascadeBtn.querySelector('.upgrade-button-cost');
+                if (costSpan) costSpan.textContent = 'Max Level';
+            } else {
+                // Recalculate for non-max case
+                const messageCost = Math.floor(getCascadeCost(currentCascades) * getCostReductionMultiplier());
+                const canAfford = hasGen1Bot && totalMessages >= messageCost;
+                
+                buyCascadeBtn.disabled = !canAfford;
+                if (!canAfford) {
+                    buyCascadeBtn.setAttribute('disabled', 'disabled');
+                } else {
+                    buyCascadeBtn.removeAttribute('disabled');
+                }
+                buyCascadeBtn.classList.toggle('disabled', !canAfford);
+                
+                const costSpan = buyCascadeBtn.querySelector('.upgrade-button-cost');
+                if (costSpan) {
+                    if (!hasGen1Bot) {
+                        costSpan.textContent = `Need 1 Bot from ${gen1ServerName}`;
+                    } else {
+                        costSpan.textContent = `${formatNumber(messageCost, 2)} Messages + 1 Bot`;
+                    }
+                }
+            }
+            
+            // Update stats
+            const cascadeStat = Array.from(document.querySelectorAll('.upgrade-stat')).find(stat => 
+                stat.querySelector('.stat-label')?.textContent === 'Current Cascades:'
+            );
+            if (cascadeStat) {
+                const valueSpan = cascadeStat.querySelector('.stat-value');
+                if (valueSpan) {
+                    // Re-read current cascades to ensure it's up to date
+                    const updatedCascades = gen2.cascades || 0;
+                    valueSpan.textContent = formatNumber(updatedCascades, 0);
+                }
+            }
+            
+                    // Update bot stat label and value - check all upgrade stats to find the right one
+                    const allStats = Array.from(document.querySelectorAll('.upgrade-stat'));
+                    for (const stat of allStats) {
+                        const label = stat.querySelector('.stat-label')?.textContent;
+                        if (label && label.includes('Bots Available')) {
+                            const labelSpan = stat.querySelector('.stat-label');
+                            const valueSpan = stat.querySelector('.stat-value');
+                            if (labelSpan) labelSpan.textContent = `${gen1ServerName} Bots Available:`;
+                            if (valueSpan) {
+                                valueSpan.textContent = formatNumber(gen1Bots, 0);
+                                valueSpan.classList.toggle('insufficient', !hasGen1Bot);
+                            }
+                            break;
+                        }
+                    }
+            
+            // Update production stats
+            const gen1Production = getGeneratorProduction('generator1');
+            const cascadeProduction = getGeneratorProduction('generator2');
+            const productionStat = Array.from(document.querySelectorAll('.upgrade-stat')).find(stat => 
+                stat.querySelector('.stat-label')?.textContent === 'Total Cascade Production:'
+            );
+            if (productionStat) {
+                const valueSpan = productionStat.querySelector('.stat-value');
+                if (valueSpan) valueSpan.textContent = `${formatNumber(cascadeProduction, 2)} msg/s`;
+            }
+            
+            // Update description
+            const cascadeItem = buyCascadeBtn.closest('.upgrade-item');
+            if (cascadeItem) {
+                const description = cascadeItem.querySelector('.upgrade-description');
+                if (description) {
+                    const cascadeEfficiency = gen2.cascadeEfficiency || 0.1;
+                    const efficiencyPercent = cascadeEfficiency * 100;
+                    const productionPerCascade = currentCascades > 0 ? cascadeProduction / currentCascades : (gen1Production * cascadeEfficiency);
+                    description.textContent = `Purchase a message cascade that generates messages based on your Auto-Typer Bot production. Each cascade generates ${formatNumber(productionPerCascade, 2)} messages per second (${formatNumber(efficiencyPercent, 1)}% of ${gen1ServerName}'s production). Requires 1 bot from ${gen1ServerName}.`;
+                }
+            }
+        }
+        
+        // Cascade Efficiency button
+        const efficiencyBtn = document.getElementById('upgrade-cascade-efficiency');
+        if (efficiencyBtn) {
+            const cascadeEfficiency = gen2.cascadeEfficiency || 0.1;
+            const efficiencyLevel = Math.floor(Math.log(cascadeEfficiency / 0.1) / Math.log(1.1));
+            const maxLevels = getGenerator2MaxLevels();
+            const isMaxLevel = efficiencyLevel >= maxLevels.cascadeEfficiency;
+            if (isMaxLevel) {
+                efficiencyBtn.disabled = true;
+                efficiencyBtn.classList.add('disabled');
+                const costSpan = efficiencyBtn.querySelector('.upgrade-button-cost');
+                if (costSpan) costSpan.textContent = 'Max Level';
+            } else {
+                const efficiencyCost = Math.floor(getCascadeEfficiencyUpgradeCost(cascadeEfficiency) * getCostReductionMultiplier());
+                const canAfford = totalMessages >= efficiencyCost;
+                efficiencyBtn.disabled = !canAfford;
+                if (!canAfford) {
+                    efficiencyBtn.classList.add('disabled');
+                } else {
+                    efficiencyBtn.classList.remove('disabled');
+                }
+                const costSpan = efficiencyBtn.querySelector('.upgrade-button-cost');
+                if (costSpan) costSpan.textContent = `${formatNumber(efficiencyCost, 2)} Messages`;
+            }
+            
+            // Update efficiency level display
+            const efficiencyLevelDisplay = efficiencyBtn.closest('.upgrade-item')?.querySelector('.upgrade-level');
+            if (efficiencyLevelDisplay) {
+                efficiencyLevelDisplay.textContent = `Level ${efficiencyLevel}`;
+            }
+            
+            // Update efficiency stat
+            const efficiencyStat = Array.from(document.querySelectorAll('.upgrade-stat')).find(stat => 
+                stat.querySelector('.stat-label')?.textContent === 'Current Efficiency:'
+            );
+            if (efficiencyStat) {
+                const valueSpan = efficiencyStat.querySelector('.stat-value');
+                if (valueSpan) {
+                    const efficiencyPercent = (cascadeEfficiency * 100);
+                    valueSpan.textContent = `${formatNumber(efficiencyPercent, 1)}%`;
+                }
+            }
+        }
+        
+        // Auto-Buy Delay button
+        const autoBuyDelayBtn = document.getElementById('upgrade-generator2-auto-buy-delay');
+        if (autoBuyDelayBtn) {
+            // Always read fresh from gameState
+            const autoBuyDelayLevel = gen2.autoBuyDelayLevel || 0;
+            const maxLevels = getGenerator2MaxLevels();
+            const isMaxLevel = autoBuyDelayLevel >= maxLevels.autoBuyDelay;
+            
+            if (isMaxLevel) {
+                autoBuyDelayBtn.disabled = true;
+                autoBuyDelayBtn.setAttribute('disabled', 'disabled');
+                autoBuyDelayBtn.classList.add('disabled');
+                const costSpan = autoBuyDelayBtn.querySelector('.upgrade-button-cost');
+                if (costSpan) costSpan.textContent = 'Max Level';
+            } else {
+                const autoBuyDelayCost = Math.floor(getGenerator2AutoBuyDelayCost(autoBuyDelayLevel) * getCostReductionMultiplier());
+                const canAfford = totalMessages >= autoBuyDelayCost;
+                autoBuyDelayBtn.disabled = !canAfford;
+                if (!canAfford) {
+                    autoBuyDelayBtn.setAttribute('disabled', 'disabled');
+                } else {
+                    autoBuyDelayBtn.removeAttribute('disabled');
+                }
+                autoBuyDelayBtn.classList.toggle('disabled', !canAfford);
+                const costSpan = autoBuyDelayBtn.querySelector('.upgrade-button-cost');
+                if (costSpan) costSpan.textContent = `${formatNumber(autoBuyDelayCost, 2)} Messages`;
+            }
+            
+            // Update delay level display - always read fresh
+            const delayLevelDisplay = autoBuyDelayBtn.closest('.upgrade-item')?.querySelector('.upgrade-level');
+            if (delayLevelDisplay) {
+                const currentDelayLevel = gen2.autoBuyDelayLevel || 0;
+                const maxLevels = getGenerator2MaxLevels();
+                const isMaxLevel = currentDelayLevel >= maxLevels.autoBuyDelay;
+                delayLevelDisplay.textContent = isMaxLevel ? 'Max Level' : `Level ${currentDelayLevel}`;
+            }
+            
+            // Update delay stat - always read fresh
+            const delayStat = Array.from(document.querySelectorAll('.upgrade-stat')).find(stat => 
+                stat.querySelector('.stat-label')?.textContent === 'Current Delay:'
+            );
+            if (delayStat) {
+                const valueSpan = delayStat.querySelector('.stat-value');
+                if (valueSpan) {
+                    const currentDelayLevel = gen2.autoBuyDelayLevel || 0;
+                    const delay = getAutoBuyDelay(currentDelayLevel);
+                    valueSpan.textContent = `${formatNumber(delay, 1)}s`;
+                }
+            }
+            
+            // Update delay description - always read fresh
+            const delayItem = autoBuyDelayBtn.closest('.upgrade-item');
+            if (delayItem) {
+                const description = delayItem.querySelector('.upgrade-description');
+                if (description) {
+                    const currentDelayLevel = gen2.autoBuyDelayLevel || 0;
+                    const delay = getAutoBuyDelay(currentDelayLevel);
+                    description.textContent = `Reduces the delay between auto-buy purchases. Current delay: ${formatNumber(delay, 1)}s`;
+                }
+            }
+        }
+        
+        // Auto-Buy button (update purchase button state and toggle button visibility)
+        const buyAutoBuyBtn = document.getElementById('buy-generator2-auto-buy');
+        const toggleAutoBuyBtn = document.getElementById('toggle-generator2-auto-buy');
+        
+        if (gen2.autoBuyPurchased) {
+            // If purchased, show toggle button and hide purchase button
+            if (buyAutoBuyBtn) {
+                buyAutoBuyBtn.style.display = 'none';
+            }
+            if (toggleAutoBuyBtn) {
+                toggleAutoBuyBtn.style.display = 'block';
+                const buttonText = toggleAutoBuyBtn.querySelector('.upgrade-button-text');
+                if (buttonText) {
+                    buttonText.textContent = gen2.autoBuy ? 'Disable Auto-Buy' : 'Enable Auto-Buy';
+                }
+            }
+        } else {
+            // If not purchased, show purchase button and hide toggle button
+            if (toggleAutoBuyBtn) {
+                toggleAutoBuyBtn.style.display = 'none';
+            }
+            if (buyAutoBuyBtn) {
+                buyAutoBuyBtn.style.display = 'block';
+                const autoBuyCost = 50000;
+                const canAfford = totalMessages >= autoBuyCost;
+                buyAutoBuyBtn.disabled = !canAfford;
+                buyAutoBuyBtn.classList.toggle('disabled', !canAfford);
+            }
+        }
+        
+        // Prestige button
+        const prestigeBtn = document.getElementById('prestige-generator2');
+        if (prestigeBtn) {
+            const allMaxed = isGenerator2AllMaxed();
+            const prestigeCost = getPrestigeCost('generator2');
+            const canAfford = totalMessages >= prestigeCost;
+            const shouldEnable = allMaxed && canAfford;
+            
+            prestigeBtn.disabled = !shouldEnable;
+            if (!shouldEnable) {
+                prestigeBtn.classList.add('disabled');
+            } else {
+                prestigeBtn.classList.remove('disabled');
+            }
+            
+            const costSpan = prestigeBtn.querySelector('.upgrade-button-cost');
+            if (costSpan) {
+                costSpan.textContent = allMaxed ? `${formatNumber(prestigeCost, 2)} Messages` : 'Max All Upgrades';
+            }
+            
+            // Update prestige level display
+            const prestigeItem = prestigeBtn.closest('.upgrade-item');
+            if (prestigeItem) {
+                const prestigeLevelDisplay = prestigeItem.querySelector('.upgrade-level');
+                if (prestigeLevelDisplay) {
+                    const prestigeLevel = gen2.prestigeLevel || 0;
+                    if (prestigeLevel > 0) {
+                        prestigeLevelDisplay.textContent = `Prestige ${prestigeLevel}`;
+                        prestigeLevelDisplay.style.display = 'block';
+                    } else {
+                        prestigeLevelDisplay.style.display = 'none';
+                    }
+                }
+                
+                // Update prestige level stat
+                const prestigeLevelStat = Array.from(prestigeItem.querySelectorAll('.upgrade-stat')).find(stat => {
+                    const label = stat.querySelector('.stat-label')?.textContent;
+                    return label && label === 'Prestige Level:';
+                });
+                if (prestigeLevelStat) {
+                    const valueSpan = prestigeLevelStat.querySelector('.stat-value');
+                    if (valueSpan) {
+                        valueSpan.textContent = gen2.prestigeLevel || 0;
+                    }
+                }
+                
+                // Update current max levels stat
+                const maxLevelsStat = Array.from(prestigeItem.querySelectorAll('.upgrade-stat')).find(stat => {
+                    const label = stat.querySelector('.stat-label')?.textContent;
+                    return label && label === 'Current Max Levels:';
+                });
+                if (maxLevelsStat) {
+                    const valueSpan = maxLevelsStat.querySelector('.stat-value');
+                    if (valueSpan) {
+                        const maxLevels = getGenerator2MaxLevels();
+                        valueSpan.textContent = `Cascades: ${maxLevels.cascades}, Efficiency: ${maxLevels.cascadeEfficiency}, Delay: ${maxLevels.autoBuyDelay}`;
+                    }
+                }
+                
+                // Update requirement stat visibility
+                const requirementStat = Array.from(prestigeItem.querySelectorAll('.upgrade-stat')).find(stat => {
+                    const label = stat.querySelector('.stat-label')?.textContent;
+                    return label && label.trim() === 'Requirement:';
+                });
+                if (requirementStat) {
+                    requirementStat.style.display = allMaxed ? 'none' : 'block';
+                }
+                
+                // Update opacity based on allMaxed
+                if (allMaxed) {
+                    prestigeItem.style.opacity = '1';
+                } else {
+                    prestigeItem.style.opacity = '0.6';
+                }
             }
         }
     }
@@ -945,8 +1402,9 @@ function loadServer(serverId) {
         }
     });
     
-    // Update server name
-    document.getElementById('server-name').textContent = server.name;
+    // Update server name (use stored name for generators, default for others)
+    const displayName = (serverId.startsWith('generator')) ? getGeneratorServerName(serverId) : server.name;
+    document.getElementById('server-name').textContent = displayName;
     
     // Update channel list
     const channelList = document.getElementById('channel-list');
@@ -992,8 +1450,13 @@ function loadServer(serverId) {
     let channelToLoad = null;
     
     // Check if we have a saved channel for this server
-    if (lastChannelsByServer[serverId] && server.channels[lastChannelsByServer[serverId]]) {
-        channelToLoad = lastChannelsByServer[serverId];
+    let savedChannel = lastChannelsByServer[serverId];
+    // Migration: if saved channel is 'main' or 'upgrades' for generator1, use 'general'
+    if (serverId === 'generator1' && (savedChannel === 'main' || savedChannel === 'upgrades')) {
+        savedChannel = 'general';
+    }
+    if (savedChannel && server.channels[savedChannel]) {
+        channelToLoad = savedChannel;
     }
     // Otherwise, check if current channel exists in this server
     else if (server.channels[currentChannel]) {
@@ -1094,55 +1557,19 @@ function loadChannel(channelId) {
         
         // Setup messages container
         setupMessagesContainer();
-    } else if (channelId === 'main' && currentServer === 'generator1') {
-        // Auto-Typer Bot main channel
-        const gen = gameState.generators.generator1 || { bots: 0, efficiency: 1.0, botSpeed: 0, autoBuy: false, autoBuyPurchased: false, autoBuyDelayLevel: 0 };
-        const production = getGeneratorProduction('generator1');
-        const msgPerBot = 1.0 * Math.pow(1.1, gen.botSpeed || 0);
-        const totalMessages = gameState.messages + (gameState.fractionalMessages || 0);
-        
-        contentBody.innerHTML = `
-            <div class="generator-content">
-                <div class="generator-info">
-                    <h2>Auto-Typer Bot</h2>
-                    <p>Automatically generates messages for you. Each bot produces ${formatNumber(msgPerBot * (gen.efficiency || 1.0) * Math.pow(1.1, gameState.upgrades.autoGenerationBoost || 0) * Math.pow(1.05, gameState.upgrades.messageMultiplier || 0), 2)} messages per second.</p>
-                </div>
-                <div class="generator-stats">
-                    <div class="generator-stat">
-                        <span class="stat-label">Active Bots:</span>
-                            <span class="stat-value">${formatNumber(gen.bots || 0, 0)}</span>
-                    </div>
-                    <div class="generator-stat">
-                        <span class="stat-label">Bot Speed:</span>
-                        <span class="stat-value">Level ${gen.botSpeed || 0}</span>
-                    </div>
-                    <div class="generator-stat">
-                        <span class="stat-label">Efficiency:</span>
-                        <span class="stat-value">${formatNumber((gen.efficiency || 1.0) * 100, 0)}%</span>
-                    </div>
-                    <div class="generator-stat">
-                        <span class="stat-label">Auto-Buy:</span>
-                        <span class="stat-value">${gen.autoBuy ? 'Enabled' : 'Disabled'}</span>
-                    </div>
-                    <div class="generator-stat">
-                        <span class="stat-label">Production Rate:</span>
-                        <span class="stat-value">${formatNumber(production * getGlobalMessageMultiplier(), 2)} msg/s</span>
-                    </div>
-                </div>
-            </div>
-        `;
-    } else if (channelId === 'upgrades' && currentServer === 'generator1') {
+    } else if (channelId === 'general' && currentServer === 'generator1') {
         // Auto-Typer Bot upgrades
         const gen = gameState.generators.generator1 || { bots: 0, efficiency: 1.0, botSpeed: 0, autoBuy: false, autoBuyPurchased: false, autoBuyDelayLevel: 0 };
         const currentBots = gen.bots || 0;
-        const isMaxBots = currentBots >= GENERATOR1_MAX_LEVELS.bots;
+        const maxLevels = getGenerator1MaxLevels();
+        const isMaxBots = currentBots >= maxLevels.bots;
         const botCost = isMaxBots ? 0 : Math.floor(getBotCost(currentBots) * getCostReductionMultiplier());
         const currentEfficiency = gen.efficiency || 1.0;
         const efficiencyLevel = Math.floor(Math.log(currentEfficiency / 1.0) / Math.log(1.1));
-        const isMaxEfficiency = efficiencyLevel >= GENERATOR1_MAX_LEVELS.efficiency;
+        const isMaxEfficiency = efficiencyLevel >= maxLevels.efficiency;
         const efficiencyCost = isMaxEfficiency ? 0 : Math.floor(getEfficiencyUpgradeCost(currentEfficiency) * getCostReductionMultiplier());
         const botSpeedLevel = gen.botSpeed || 0;
-        const isMaxBotSpeed = botSpeedLevel >= GENERATOR1_MAX_LEVELS.botSpeed;
+        const isMaxBotSpeed = botSpeedLevel >= maxLevels.botSpeed;
         const botSpeedCost = isMaxBotSpeed ? 0 : Math.floor(getBotSpeedCost(botSpeedLevel) * getCostReductionMultiplier());
         const autoBuyCost = 5000;
         const autoBuyDelayLevel = gen.autoBuyDelayLevel || 0;
@@ -1258,6 +1685,41 @@ function loadChannel(channelId) {
                         </button>
                     `}
                 </div>
+                
+                <div class="upgrade-item" style="border: 2px solid var(--accent-color); background-color: var(--bg-medium); ${!isGenerator1AllMaxed() ? 'opacity: 0.6;' : ''}">
+                    <div class="upgrade-header">
+                        <h3 class="upgrade-title">🌟 Prestige Server</h3>
+                        ${gen.prestigeLevel > 0 ? `<div class="upgrade-level">Prestige ${gen.prestigeLevel}</div>` : ''}
+                    </div>
+                    <p class="upgrade-description">Reset all upgrades for this generator and increase all max levels by 10. This allows you to progress further!</p>
+                    <div class="upgrade-stats">
+                        <div class="upgrade-stat">
+                            <span class="stat-label">Prestige Level:</span>
+                            <span class="stat-value">${gen.prestigeLevel || 0}</span>
+                        </div>
+                        <div class="upgrade-stat">
+                            <span class="stat-label">Current Max Levels:</span>
+                            <span class="stat-value">Bots: ${maxLevels.bots}, Efficiency: ${maxLevels.efficiency}, Speed: ${maxLevels.botSpeed}, Delay: ${maxLevels.autoBuyDelay}</span>
+                        </div>
+                        ${!isGenerator1AllMaxed() ? `
+                        <div class="upgrade-stat">
+                            <span class="stat-label" style="color: var(--text-muted);">Requirement:</span>
+                            <span class="stat-value" style="color: var(--text-muted);">Max all upgrades to prestige</span>
+                        </div>
+                        ` : ''}
+                    </div>
+                    ${(() => {
+                        const prestigeCost = getPrestigeCost('generator1');
+                        const canAffordPrestige = totalMessages >= prestigeCost;
+                        const allMaxed = isGenerator1AllMaxed();
+                        return `
+                            <button class="upgrade-button ${(allMaxed && canAffordPrestige) ? '' : 'disabled'}" id="prestige-generator1" ${(!allMaxed || !canAffordPrestige) ? 'disabled' : ''}>
+                                <span class="upgrade-button-text">Prestige Server</span>
+                                <span class="upgrade-button-cost">${allMaxed ? `${formatNumber(prestigeCost, 2)} Messages` : 'Max All Upgrades'}</span>
+                            </button>
+                        `;
+                    })()}
+                </div>
             </div>
         `;
         
@@ -1301,6 +1763,229 @@ function loadChannel(channelId) {
         if (upgradeAutoBuyDelayBtn) {
             upgradeAutoBuyDelayBtn.addEventListener('click', () => {
                 upgradeAutoBuyDelay('generator1');
+            });
+        }
+        
+        const prestigeBtn = document.getElementById('prestige-generator1');
+        if (prestigeBtn) {
+            prestigeBtn.addEventListener('click', () => {
+                if (prestigeGenerator('generator1')) {
+                    // Prestige successful - UI will refresh automatically
+                }
+            });
+        }
+    } else if (channelId === 'general' && currentServer === 'generator2') {
+        // Message Cascade upgrades
+        const gen2 = gameState.generators.generator2 || { cascades: 0, cascadeEfficiency: 0.1, autoBuy: false, autoBuyPurchased: false, autoBuyDelayLevel: 0 };
+        const gen1 = gameState.generators.generator1 || { bots: 0 };
+        const currentCascades = gen2.cascades || 0;
+        const gen1Bots = gen1.bots || 0;
+        
+        // Get generator1 server name
+        const gen1ServerName = isGeneratorUnlocked('generator1') ? getGeneratorServerName('generator1') : 'Generator 1';
+        
+        // Calculate costs and requirements
+        const maxLevels = getGenerator2MaxLevels();
+        const isMaxCascades = currentCascades >= maxLevels.cascades;
+        const messageCost = isMaxCascades ? 0 : Math.floor(getCascadeCost(currentCascades) * getCostReductionMultiplier());
+        const totalMessages = gameState.messages + (gameState.fractionalMessages || 0);
+        const hasGen1Bot = gen1Bots >= 1;
+        const canAffordCascade = !isMaxCascades && hasGen1Bot && totalMessages >= messageCost;
+        
+        // Calculate production rate
+        const gen1Production = getGeneratorProduction('generator1');
+        const cascadeProduction = getGeneratorProduction('generator2');
+        const cascadeEfficiency = gen2.cascadeEfficiency || 0.1;
+        const efficiencyPercent = cascadeEfficiency * 100;
+        const productionPerCascade = currentCascades > 0 ? cascadeProduction / currentCascades : (gen1Production * cascadeEfficiency);
+        
+        // Cascade efficiency upgrade
+        const efficiencyLevel = Math.floor(Math.log(cascadeEfficiency / 0.1) / Math.log(1.1));
+        const isMaxEfficiency = efficiencyLevel >= maxLevels.cascadeEfficiency;
+        const efficiencyCost = isMaxEfficiency ? 0 : Math.floor(getCascadeEfficiencyUpgradeCost(cascadeEfficiency) * getCostReductionMultiplier());
+        const canAffordEfficiency = !isMaxEfficiency && totalMessages >= efficiencyCost;
+        
+        // Auto-buy
+        const autoBuyCost = 50000;
+        const canAffordAutoBuy = totalMessages >= autoBuyCost && !gen2.autoBuyPurchased;
+        const autoBuyDelayLevel = gen2.autoBuyDelayLevel || 0;
+        const maxDelayLevel = getGenerator2MaxLevels().autoBuyDelay;
+        const isMaxDelayLevel = autoBuyDelayLevel >= maxDelayLevel;
+        const autoBuyDelayCost = isMaxDelayLevel ? 0 : Math.floor(getGenerator2AutoBuyDelayCost(autoBuyDelayLevel) * getCostReductionMultiplier());
+        const canAffordAutoBuyDelay = !isMaxDelayLevel && totalMessages >= autoBuyDelayCost;
+        const autoBuyDelay = getAutoBuyDelay(autoBuyDelayLevel);
+        
+        contentBody.innerHTML = `
+            <div class="upgrade-content">
+                <div class="upgrade-item">
+                    <div class="upgrade-header">
+                        <h3 class="upgrade-title">Buy Message Cascade</h3>
+                    </div>
+                    <p class="upgrade-description">Purchase a message cascade that generates messages based on your Auto-Typer Bot production. Each cascade generates ${formatNumber(productionPerCascade, 2)} messages per second (${formatNumber(efficiencyPercent, 1)}% of ${gen1ServerName}'s production). Requires 1 bot from ${gen1ServerName}.</p>
+                    <div class="upgrade-stats">
+                        <div class="upgrade-stat">
+                            <span class="stat-label">Current Cascades:</span>
+                            <span class="stat-value">${formatNumber(currentCascades, 0)}</span>
+                        </div>
+                        <div class="upgrade-stat">
+                            <span class="stat-label">${gen1ServerName} Bots Available:</span>
+                            <span class="stat-value ${hasGen1Bot ? '' : 'insufficient'}">${formatNumber(gen1Bots, 0)}</span>
+                        </div>
+                        <div class="upgrade-stat">
+                            <span class="stat-label">Total Cascade Production:</span>
+                            <span class="stat-value">${formatNumber(cascadeProduction, 2)} msg/s</span>
+                        </div>
+                    </div>
+                    <button class="upgrade-button ${canAffordCascade && !isMaxCascades ? '' : 'disabled'}" id="buy-cascade" ${!canAffordCascade || isMaxCascades ? 'disabled' : ''}>
+                        <span class="upgrade-button-text">Purchase Cascade</span>
+                        <span class="upgrade-button-cost">${isMaxCascades ? 'Max Level' : !hasGen1Bot ? `Need 1 Bot from ${gen1ServerName}` : `${formatNumber(messageCost, 2)} Messages + 1 Bot`}</span>
+                    </button>
+                </div>
+                
+                <div class="upgrade-item">
+                    <div class="upgrade-header">
+                        <h3 class="upgrade-title">Cascade Efficiency</h3>
+                        <div class="upgrade-level">Level ${efficiencyLevel}</div>
+                    </div>
+                    <p class="upgrade-description">Increases the percentage of ${gen1ServerName}'s production each cascade generates by 10% per upgrade (compounding).</p>
+                    <div class="upgrade-stats">
+                        <div class="upgrade-stat">
+                            <span class="stat-label">Current Efficiency:</span>
+                            <span class="stat-value">${formatNumber(efficiencyPercent, 1)}%</span>
+                        </div>
+                    </div>
+                    <button class="upgrade-button ${canAffordEfficiency && !isMaxEfficiency ? '' : 'disabled'}" id="upgrade-cascade-efficiency" ${!canAffordEfficiency || isMaxEfficiency ? 'disabled' : ''}>
+                        <span class="upgrade-button-text">Upgrade Cascade Efficiency</span>
+                        <span class="upgrade-button-cost">${isMaxEfficiency ? 'Max Level' : `${formatNumber(efficiencyCost, 2)} Messages`}</span>
+                    </button>
+                </div>
+                
+                <div class="upgrade-item">
+                    <div class="upgrade-header">
+                        <h3 class="upgrade-title">Auto-Buy Cascades</h3>
+                    </div>
+                    <p class="upgrade-description">Automatically purchase cascades when you have enough messages and bots. Can be toggled on/off.</p>
+                    <div class="upgrade-stats">
+                        <div class="upgrade-stat">
+                            <span class="stat-label">Status:</span>
+                            <span class="stat-value">${gen2.autoBuy ? 'Enabled' : 'Disabled'}</span>
+                        </div>
+                    </div>
+                    ${gen2.autoBuyPurchased ? `
+                        <button class="upgrade-button" id="toggle-generator2-auto-buy">
+                            <span class="upgrade-button-text">${gen2.autoBuy ? 'Disable' : 'Enable'} Auto-Buy</span>
+                        </button>
+                    ` : `
+                        <button class="upgrade-button ${canAffordAutoBuy ? '' : 'disabled'}" id="buy-generator2-auto-buy" ${!canAffordAutoBuy ? 'disabled' : ''}>
+                            <span class="upgrade-button-text">Purchase Auto-Buy</span>
+                            <span class="upgrade-button-cost">${formatNumber(autoBuyCost, 2)} Messages</span>
+                        </button>
+                    `}
+                </div>
+                
+                <div class="upgrade-item">
+                    <div class="upgrade-header">
+                        <h3 class="upgrade-title">Auto-Buy Speed</h3>
+                        <div class="upgrade-level">${isMaxDelayLevel ? 'Max Level' : `Level ${autoBuyDelayLevel}`}</div>
+                    </div>
+                    <p class="upgrade-description">Reduces the delay between auto-buy purchases. Current delay: ${formatNumber(autoBuyDelay, 1)}s</p>
+                    <div class="upgrade-stats">
+                        <div class="upgrade-stat">
+                            <span class="stat-label">Current Delay:</span>
+                            <span class="stat-value">${formatNumber(autoBuyDelay, 1)}s</span>
+                        </div>
+                    </div>
+                    ${isMaxDelayLevel ? `
+                        <button class="upgrade-button disabled" disabled>
+                            <span class="upgrade-button-text">Max Level Reached</span>
+                        </button>
+                    ` : `
+                        <button class="upgrade-button ${canAffordAutoBuyDelay ? '' : 'disabled'}" id="upgrade-generator2-auto-buy-delay" ${!canAffordAutoBuyDelay ? 'disabled' : ''}>
+                            <span class="upgrade-button-text">Upgrade Auto-Buy Speed</span>
+                            <span class="upgrade-button-cost">${formatNumber(autoBuyDelayCost, 2)} Messages</span>
+                        </button>
+                    `}
+                </div>
+                
+                <div class="upgrade-item" style="border: 2px solid var(--accent-color); background-color: var(--bg-medium); ${!isGenerator2AllMaxed() ? 'opacity: 0.6;' : ''}">
+                    <div class="upgrade-header">
+                        <h3 class="upgrade-title">🌟 Prestige Server</h3>
+                        ${gen2.prestigeLevel > 0 ? `<div class="upgrade-level">Prestige ${gen2.prestigeLevel}</div>` : ''}
+                    </div>
+                    <p class="upgrade-description">Reset all upgrades for this generator and increase all max levels by 10. This allows you to progress further!</p>
+                    <div class="upgrade-stats">
+                        <div class="upgrade-stat">
+                            <span class="stat-label">Prestige Level:</span>
+                            <span class="stat-value">${gen2.prestigeLevel || 0}</span>
+                        </div>
+                        <div class="upgrade-stat">
+                            <span class="stat-label">Current Max Levels:</span>
+                            <span class="stat-value">Cascades: ${maxLevels.cascades}, Efficiency: ${maxLevels.cascadeEfficiency}, Delay: ${maxLevels.autoBuyDelay}</span>
+                        </div>
+                        ${!isGenerator2AllMaxed() ? `
+                        <div class="upgrade-stat">
+                            <span class="stat-label" style="color: var(--text-muted);">Requirement:</span>
+                            <span class="stat-value" style="color: var(--text-muted);">Max all upgrades to prestige</span>
+                        </div>
+                        ` : ''}
+                    </div>
+                    ${(() => {
+                        const prestigeCost = getPrestigeCost('generator2');
+                        const canAffordPrestige = totalMessages >= prestigeCost;
+                        const allMaxed = isGenerator2AllMaxed();
+                        return `
+                            <button class="upgrade-button ${(allMaxed && canAffordPrestige) ? '' : 'disabled'}" id="prestige-generator2" ${(!allMaxed || !canAffordPrestige) ? 'disabled' : ''}>
+                                <span class="upgrade-button-text">Prestige Server</span>
+                                <span class="upgrade-button-cost">${allMaxed ? `${formatNumber(prestigeCost, 2)} Messages` : 'Max All Upgrades'}</span>
+                            </button>
+                        `;
+                    })()}
+                </div>
+            </div>
+        `;
+        
+        // Setup upgrade handlers
+        const buyCascadeBtn = document.getElementById('buy-cascade');
+        if (buyCascadeBtn) {
+            buyCascadeBtn.addEventListener('click', () => {
+                purchaseCascade();
+            });
+        }
+        
+        const upgradeEfficiencyBtn = document.getElementById('upgrade-cascade-efficiency');
+        if (upgradeEfficiencyBtn) {
+            upgradeEfficiencyBtn.addEventListener('click', () => {
+                upgradeCascadeEfficiency();
+            });
+        }
+        
+        const buyAutoBuyBtn = document.getElementById('buy-generator2-auto-buy');
+        if (buyAutoBuyBtn) {
+            buyAutoBuyBtn.addEventListener('click', () => {
+                purchaseGenerator2AutoBuy();
+            });
+        }
+        
+        const toggleAutoBuyBtn = document.getElementById('toggle-generator2-auto-buy');
+        if (toggleAutoBuyBtn) {
+            toggleAutoBuyBtn.addEventListener('click', () => {
+                toggleGenerator2AutoBuy();
+            });
+        }
+        
+        const upgradeAutoBuyDelayBtn = document.getElementById('upgrade-generator2-auto-buy-delay');
+        if (upgradeAutoBuyDelayBtn) {
+            upgradeAutoBuyDelayBtn.addEventListener('click', () => {
+                upgradeGenerator2AutoBuyDelay();
+            });
+        }
+        
+        const prestigeBtn = document.getElementById('prestige-generator2');
+        if (prestigeBtn) {
+            prestigeBtn.addEventListener('click', () => {
+                if (prestigeGenerator('generator2')) {
+                    // Prestige successful - UI will refresh automatically
+                }
             });
         }
     } else if (channelId === 'global1' && currentServer === 'upgrades') {
@@ -1504,6 +2189,14 @@ function loadChannel(channelId) {
                         <button class="settings-button danger" id="reset-game">Reset Game</button>
                     </div>
                 </div>
+                
+                <div class="settings-section">
+                    <h3 class="settings-title">Debug Tools</h3>
+                    <p class="settings-description">Testing and development tools.</p>
+                    <div class="settings-buttons">
+                        <button class="settings-button" id="debug-add-messages" style="background-color: #5865f2;">Add 10,000 Messages</button>
+                    </div>
+                </div>
             </div>
         `;
         setupSettingsHandlers();
@@ -1553,12 +2246,44 @@ function loadChannel(channelId) {
         const costEfficiencyLevel = gameState.upgrades.costEfficiency || 0;
         const costEfficiencyBuff = formatNumber(Math.min(costEfficiencyLevel * 5, 50), 0);
         
+        // Server prestige stats
+        let serversStatsHtml = '';
+        const unlockedGenerators = gameState.generators.unlocked || [];
+        if (unlockedGenerators.length > 0) {
+            let serverItemsHtml = '';
+            const generatorOrder = ['generator1', 'generator2', 'generator3'];
+            generatorOrder.forEach(genId => {
+                if (isGeneratorUnlocked(genId)) {
+                    const serverName = getGeneratorServerName(genId);
+                    const gen = gameState.generators[genId] || {};
+                    const prestigeLevel = gen.prestigeLevel || 0;
+                    serverItemsHtml += `
+                        <div class="stat-item">
+                            <span class="stat-label">${serverName}:</span>
+                            <span class="stat-value">Prestige ${prestigeLevel}</span>
+                        </div>
+                    `;
+                }
+            });
+            
+            if (serverItemsHtml) {
+                serversStatsHtml = `
+                    <div class="stats-section">
+                        <h3 class="stats-section-title">Servers</h3>
+                        <div class="stats-grid">
+                            ${serverItemsHtml}
+                        </div>
+                    </div>
+                `;
+            }
+        }
+        
         // Generator stats
         let generatorStatsHtml = '';
         if (isGeneratorUnlocked('generator1')) {
             const gen = gameState.generators.generator1 || {};
             const production = getGeneratorProduction('generator1');
-            generatorStatsHtml = `
+            generatorStatsHtml += `
                 <div class="stats-section">
                     <h3 class="stats-section-title">Auto-Typer Bot</h3>
                     <div class="stats-grid">
@@ -1573,6 +2298,25 @@ function loadChannel(channelId) {
                         <div class="stat-item">
                             <span class="stat-label">Efficiency:</span>
                             <span class="stat-value">${formatNumber((gen.efficiency || 1.0) * 100, 0)}%</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Production Rate:</span>
+                            <span class="stat-value">${formatNumber(production * getGlobalMessageMultiplier(), 2)} msg/s</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        if (isGeneratorUnlocked('generator2')) {
+            const gen2 = gameState.generators.generator2 || {};
+            const production = getGeneratorProduction('generator2');
+            generatorStatsHtml += `
+                <div class="stats-section">
+                    <h3 class="stats-section-title">Message Cascade</h3>
+                    <div class="stats-grid">
+                        <div class="stat-item">
+                            <span class="stat-label">Active Cascades:</span>
+                            <span class="stat-value">${formatNumber(gen2.cascades || 0, 0)}</span>
                         </div>
                         <div class="stat-item">
                             <span class="stat-label">Production Rate:</span>
@@ -1641,6 +2385,8 @@ function loadChannel(channelId) {
                         ` : ''}
                     </div>
                 </div>
+                
+                ${serversStatsHtml}
                 
                 ${generatorStatsHtml}
             </div>
@@ -1742,8 +2488,24 @@ function loadGameState() {
             }
             // Initialize generator1 if unlocked
             if (isGeneratorUnlocked('generator1') && !gameState.generators.generator1) {
-                gameState.generators.generator1 = { bots: 0, efficiency: 1.0, botSpeed: 0, autoBuy: false, autoBuyPurchased: false, autoBuyDelayLevel: 0 };
+                gameState.generators.generator1 = { bots: 0, efficiency: 1.0, botSpeed: 0, autoBuy: false, autoBuyPurchased: false, autoBuyDelayLevel: 0, prestigeLevel: 0 };
             }
+            // Ensure prestigeLevel exists for existing saves
+            if (gameState.generators.generator1 && gameState.generators.generator1.prestigeLevel === undefined) {
+                gameState.generators.generator1.prestigeLevel = 0;
+            }
+            // Assign names to unlocked generators if they don't have one (for existing saves)
+            ['generator1', 'generator2', 'generator3'].forEach(genId => {
+                if (isGeneratorUnlocked(genId)) {
+                    assignRandomServerName(genId);
+                }
+            });
+            // Assign names to unlocked generators if they don't have one (for existing saves)
+            ['generator1', 'generator2', 'generator3'].forEach(genId => {
+                if (isGeneratorUnlocked(genId)) {
+                    assignRandomServerName(genId);
+                }
+            });
             // Ensure generator1 has all properties
             if (gameState.generators.generator1) {
                 if (gameState.generators.generator1.botSpeed === undefined) {
@@ -1772,12 +2534,15 @@ function showUnlockPrompt(generatorId) {
     const totalMessages = gameState.messages + (gameState.fractionalMessages || 0);
     const canAfford = totalMessages >= cost;
     
+    // Get preview name (this stores it so it will be used when unlocking)
+    const previewName = getPreviewServerName(generatorId);
+    
     const contentBody = document.getElementById('content-body');
     contentBody.innerHTML = `
         <div class="unlock-prompt">
             <div class="unlock-content">
-                <h2>🔒 ${server.name}</h2>
-                <p>This generator is locked. Unlock it to start generating messages automatically!</p>
+                <h2>🔒 ${previewName}</h2>
+                <p>This server is locked. Unlock it to start generating messages automatically!</p>
                 <div class="unlock-info">
                     <div class="unlock-stat">
                         <span class="stat-label">Unlock Cost:</span>
@@ -1789,7 +2554,7 @@ function showUnlockPrompt(generatorId) {
                     </div>
                 </div>
                 <button class="unlock-button ${canAfford ? '' : 'disabled'}" id="unlock-generator" ${!canAfford ? 'disabled' : ''}>
-                    Unlock ${server.name}
+                    Unlock ${previewName}
                 </button>
             </div>
         </div>
@@ -1808,13 +2573,41 @@ function showUnlockPrompt(generatorId) {
     }
 }
 
-// Max levels for Generator 1
-const GENERATOR1_MAX_LEVELS = {
+// Base max levels for Generator 1 (before prestige)
+const GENERATOR1_BASE_MAX_LEVELS = {
     bots: 50,
     efficiency: 10,
     botSpeed: 10,
     autoBuyDelay: 10
 };
+
+// Base max levels for Generator 2 (before prestige)
+const GENERATOR2_BASE_MAX_LEVELS = {
+    cascades: 50,
+    cascadeEfficiency: 10,
+    autoBuyDelay: 10
+};
+
+// Get max levels for Generator 1 based on prestige level
+function getGenerator1MaxLevels() {
+    const prestigeLevel = (gameState.generators.generator1?.prestigeLevel || 0);
+    return {
+        bots: GENERATOR1_BASE_MAX_LEVELS.bots + (prestigeLevel * 10),
+        efficiency: GENERATOR1_BASE_MAX_LEVELS.efficiency + (prestigeLevel * 10),
+        botSpeed: GENERATOR1_BASE_MAX_LEVELS.botSpeed + (prestigeLevel * 10),
+        autoBuyDelay: GENERATOR1_BASE_MAX_LEVELS.autoBuyDelay + (prestigeLevel * 10)
+    };
+}
+
+// Get max levels for Generator 2 based on prestige level
+function getGenerator2MaxLevels() {
+    const prestigeLevel = (gameState.generators.generator2?.prestigeLevel || 0);
+    return {
+        cascades: GENERATOR2_BASE_MAX_LEVELS.cascades + (prestigeLevel * 10),
+        cascadeEfficiency: GENERATOR2_BASE_MAX_LEVELS.cascadeEfficiency + (prestigeLevel * 10),
+        autoBuyDelay: GENERATOR2_BASE_MAX_LEVELS.autoBuyDelay + (prestigeLevel * 10)
+    };
+}
 
 // Max levels for Global Upgrades
 const GLOBAL_UPGRADE_MAX_LEVELS = {
@@ -1830,6 +2623,312 @@ function getBotCost(currentBots) {
     // Base cost 1000, so bot #0 = 1000, bot #1 = 1050, bot #2 = 1102.5, etc.
     // Note: The free bot from unlocking doesn't count for cost scaling
     return Math.floor(1000 * Math.pow(1.05, currentBots));
+}
+
+// Get cascade cost (for generator2)
+function getCascadeCost(currentCascades) {
+    // Message cost: first one costs 10,000, then scales by 1.05x (same as bots)
+    // Base message cost 10,000, so cascade #0 = 10,000, cascade #1 = 10,500, etc.
+    return Math.floor(10000 * Math.pow(1.05, currentCascades));
+}
+
+// Get cascade efficiency upgrade cost (for generator2)
+function getCascadeEfficiencyUpgradeCost(currentEfficiency) {
+    // Each upgrade increases efficiency by 10% (0.1 -> 0.11 -> 0.121, etc.)
+    // Base cost 10000 (10x generator1 efficiency upgrade), increases by 1.2x per level
+    // Calculate level from efficiency: efficiency = 0.1 * (1.1 ^ level)
+    const level = Math.floor(Math.log(currentEfficiency / 0.1) / Math.log(1.1));
+    return Math.floor(10000 * Math.pow(1.2, level));
+}
+
+// Get generator2 auto-buy delay upgrade cost
+function getGenerator2AutoBuyDelayCost(currentLevel) {
+    // Base cost 10000 (10x generator1), increases by 1.2x per level
+    return Math.floor(10000 * Math.pow(1.2, currentLevel));
+}
+
+// Get cascade efficiency upgrade cost (for generator2)
+function getCascadeEfficiencyUpgradeCost(currentEfficiency) {
+    // Each upgrade increases efficiency by 10% (0.1 -> 0.11 -> 0.121, etc.)
+    // Base cost 10000 (10x generator1 efficiency upgrade), increases by 1.2x per level
+    // Calculate level from efficiency: efficiency = 0.1 * (1.1 ^ level)
+    const level = Math.floor(Math.log(currentEfficiency / 0.1) / Math.log(1.1));
+    return Math.floor(10000 * Math.pow(1.2, level));
+}
+
+// Get generator2 auto-buy delay upgrade cost
+function getGenerator2AutoBuyDelayCost(currentLevel) {
+    // Base cost 10000 (10x generator1), increases by 1.2x per level
+    return Math.floor(10000 * Math.pow(1.2, currentLevel));
+}
+
+// Purchase a cascade (generator2)
+function purchaseCascade() {
+    if (!isGeneratorUnlocked('generator2')) return;
+    
+    const gen2 = gameState.generators.generator2;
+    const gen1 = gameState.generators.generator1;
+    if (!gen2 || !gen1) return;
+    
+    // Check max cascade limit
+    const currentCascades = gen2.cascades || 0;
+    const maxLevels = getGenerator2MaxLevels();
+    if (currentCascades >= maxLevels.cascades) {
+        return; // Already at max
+    }
+    
+    // Check if generator1 has bots available to sacrifice
+    const gen1Bots = gen1.bots || 0;
+    if (gen1Bots < 1) {
+        return; // Need at least 1 bot from generator1
+    }
+    
+    // Calculate message cost
+    const messageCost = Math.floor(getCascadeCost(currentCascades) * getCostReductionMultiplier());
+    const totalMessages = gameState.messages + (gameState.fractionalMessages || 0);
+    
+    if (totalMessages >= messageCost) {
+        // Deduct 1 bot from generator1
+        gen1.bots = gen1Bots - 1;
+        
+        // Deduct message cost
+        if (gameState.fractionalMessages >= messageCost) {
+            gameState.fractionalMessages -= messageCost;
+        } else {
+            const remaining = messageCost - gameState.fractionalMessages;
+            gameState.fractionalMessages = 0;
+            gameState.messages -= remaining;
+        }
+        
+        // Add 1 cascade
+        gen2.cascades = currentCascades + 1;
+        autoSave();
+        updateCurrencyDisplay();
+        
+        // Only refresh UI if on generator2 channel
+        if (currentServer === 'generator2' && currentChannel === 'general') {
+            updateUpgradeButtonStates();
+        }
+        // Also refresh generator1 channel if open (to show updated bot count)
+        if (currentServer === 'generator1' && currentChannel === 'general') {
+            updateUpgradeButtonStates();
+        }
+    }
+}
+
+// Upgrade cascade efficiency (generator2)
+function upgradeCascadeEfficiency() {
+    if (!isGeneratorUnlocked('generator2')) return;
+    
+    const gen2 = gameState.generators.generator2;
+    if (!gen2) return;
+    
+    // Check max level limit
+    const currentEfficiency = gen2.cascadeEfficiency || 0.1;
+    const level = Math.floor(Math.log(currentEfficiency / 0.1) / Math.log(1.1));
+    const maxLevels = getGenerator2MaxLevels();
+    if (level >= maxLevels.cascadeEfficiency) {
+        return; // Already at max
+    }
+    
+    const cost = Math.floor(getCascadeEfficiencyUpgradeCost(currentEfficiency) * getCostReductionMultiplier());
+    const totalMessages = gameState.messages + (gameState.fractionalMessages || 0);
+    
+    if (totalMessages >= cost) {
+        // Deduct cost
+        if (gameState.fractionalMessages >= cost) {
+            gameState.fractionalMessages -= cost;
+        } else {
+            const remaining = cost - gameState.fractionalMessages;
+            gameState.fractionalMessages = 0;
+            gameState.messages -= remaining;
+        }
+        
+        // Increase efficiency by 10% (multiply by 1.1)
+        gen2.cascadeEfficiency = currentEfficiency * 1.1;
+        autoSave();
+        updateCurrencyDisplay();
+        
+        // Refresh UI if on generator2 channel - update button states and reload for description changes
+        if (currentServer === 'generator2' && currentChannel === 'general') {
+            updateUpgradeButtonStates();
+            // Also reload to update description with new percentage
+            setTimeout(() => loadChannel('general'), 50);
+        } else {
+            updateUpgradeButtonStates();
+        }
+    }
+}
+
+// Purchase auto-buy for generator2
+function purchaseGenerator2AutoBuy() {
+    if (!isGeneratorUnlocked('generator2')) return;
+    
+    const gen2 = gameState.generators.generator2;
+    if (!gen2 || gen2.autoBuyPurchased) return;
+    
+    const cost = 50000; // 10x generator1's auto-buy cost
+    const totalMessages = gameState.messages + (gameState.fractionalMessages || 0);
+    
+    if (totalMessages >= cost) {
+        // Deduct cost
+        if (gameState.fractionalMessages >= cost) {
+            gameState.fractionalMessages -= cost;
+        } else {
+            const remaining = cost - gameState.fractionalMessages;
+            gameState.fractionalMessages = 0;
+            gameState.messages -= remaining;
+        }
+        
+        gen2.autoBuyPurchased = true;
+        gen2.autoBuy = true; // Enable by default when purchased
+        autoSave();
+        updateCurrencyDisplay();
+        
+        // Refresh UI if on generator2 channel to show toggle button
+        if (currentServer === 'generator2' && currentChannel === 'general') {
+            loadChannel('general');
+        } else {
+            updateUpgradeButtonStates();
+        }
+    }
+}
+
+// Toggle auto-buy for generator2
+function toggleGenerator2AutoBuy() {
+    if (!isGeneratorUnlocked('generator2')) return;
+    
+    const gen2 = gameState.generators.generator2;
+    if (!gen2) return;
+    
+    gen2.autoBuy = !gen2.autoBuy;
+    autoSave();
+    
+    // Only refresh UI if on generator2 channel
+    if (currentServer === 'generator2' && currentChannel === 'general') {
+        // Update the toggle button text immediately
+        const toggleBtn = document.getElementById('toggle-generator2-auto-buy');
+        if (toggleBtn) {
+            const buttonText = toggleBtn.querySelector('.upgrade-button-text');
+            if (buttonText) {
+                buttonText.textContent = gen2.autoBuy ? 'Disable Auto-Buy' : 'Enable Auto-Buy';
+            }
+        }
+        
+        // Update the status stat immediately
+        const autoBuyStat = Array.from(document.querySelectorAll('.upgrade-stat')).find(stat => {
+            const label = stat.querySelector('.stat-label')?.textContent;
+            return label && label === 'Status:';
+        });
+        if (autoBuyStat) {
+            const valueSpan = autoBuyStat.querySelector('.stat-value');
+            if (valueSpan) {
+                valueSpan.textContent = gen2.autoBuy ? 'Enabled' : 'Disabled';
+            }
+        }
+        
+        // Update all other button states
+        updateUpgradeButtonStates();
+    }
+}
+
+// Check if generator2 is all maxed (for prestige)
+function isGenerator2AllMaxed() {
+    if (!isGeneratorUnlocked('generator2')) return false;
+    
+    const gen2 = gameState.generators.generator2;
+    if (!gen2) return false;
+    
+    const maxLevels = getGenerator2MaxLevels();
+    
+    // Check cascades
+    if ((gen2.cascades || 0) < maxLevels.cascades) return false;
+    
+    // Check cascade efficiency
+    const cascadeEfficiency = gen2.cascadeEfficiency || 0.1;
+    const efficiencyLevel = Math.floor(Math.log(cascadeEfficiency / 0.1) / Math.log(1.1));
+    if (efficiencyLevel < maxLevels.cascadeEfficiency) return false;
+    
+    // Check auto-buy delay
+    if ((gen2.autoBuyDelayLevel || 0) < maxLevels.autoBuyDelay) return false;
+    
+    // Check auto-buy is purchased
+    if (!gen2.autoBuyPurchased) return false;
+    
+    return true;
+}
+
+// Upgrade auto-buy delay for generator2
+function upgradeGenerator2AutoBuyDelay() {
+    if (!isGeneratorUnlocked('generator2')) return;
+    
+    const gen2 = gameState.generators.generator2;
+    if (!gen2) return;
+    
+    // Check max level limit
+    const autoBuyDelayLevel = gen2.autoBuyDelayLevel || 0;
+    const maxLevels = getGenerator2MaxLevels();
+    if (autoBuyDelayLevel >= maxLevels.autoBuyDelay) {
+        return; // Already at max
+    }
+    
+    const cost = Math.floor(getGenerator2AutoBuyDelayCost(autoBuyDelayLevel) * getCostReductionMultiplier());
+    const totalMessages = gameState.messages + (gameState.fractionalMessages || 0);
+    
+    if (totalMessages >= cost) {
+        // Deduct cost
+        if (gameState.fractionalMessages >= cost) {
+            gameState.fractionalMessages -= cost;
+        } else {
+            const remaining = cost - gameState.fractionalMessages;
+            gameState.fractionalMessages = 0;
+            gameState.messages -= remaining;
+        }
+        
+        gen2.autoBuyDelayLevel = autoBuyDelayLevel + 1;
+        autoSave();
+        updateCurrencyDisplay();
+        
+        // Only refresh UI if on generator2 channel
+        if (currentServer === 'generator2' && currentChannel === 'general') {
+            // Force immediate update
+            updateUpgradeButtonStates();
+            
+            // Also force update of level display directly
+            const autoBuyDelayBtn = document.getElementById('upgrade-generator2-auto-buy-delay');
+            if (autoBuyDelayBtn) {
+                const delayLevelDisplay = autoBuyDelayBtn.closest('.upgrade-item')?.querySelector('.upgrade-level');
+                if (delayLevelDisplay) {
+                    const currentDelayLevel = gen2.autoBuyDelayLevel || 0;
+                    const maxLevels = getGenerator2MaxLevels();
+                    const isMaxLevel = currentDelayLevel >= maxLevels.autoBuyDelay;
+                    delayLevelDisplay.textContent = isMaxLevel ? 'Max Level' : `Level ${currentDelayLevel}`;
+                }
+                
+                // Update delay stat
+                const delayStat = Array.from(document.querySelectorAll('.upgrade-stat')).find(stat => 
+                    stat.querySelector('.stat-label')?.textContent === 'Current Delay:'
+                );
+                if (delayStat) {
+                    const valueSpan = delayStat.querySelector('.stat-value');
+                    if (valueSpan) {
+                        const delay = getAutoBuyDelay(gen2.autoBuyDelayLevel || 0);
+                        valueSpan.textContent = `${formatNumber(delay, 1)}s`;
+                    }
+                }
+                
+                // Update delay description
+                const delayItem = autoBuyDelayBtn.closest('.upgrade-item');
+                if (delayItem) {
+                    const description = delayItem.querySelector('.upgrade-description');
+                    if (description) {
+                        const delay = getAutoBuyDelay(gen2.autoBuyDelayLevel || 0);
+                        description.textContent = `Reduces the delay between auto-buy purchases. Current delay: ${formatNumber(delay, 1)}s`;
+                    }
+                }
+            }
+        }
+    }
 }
 
 // Get efficiency upgrade cost
@@ -1856,8 +2955,155 @@ function getAutoBuyDelay(level) {
 
 // Get max auto-buy delay level (when delay reaches 0.1s)
 function getMaxAutoBuyDelayLevel() {
-    // For Generator 1, use the max level from GENERATOR1_MAX_LEVELS
-    return GENERATOR1_MAX_LEVELS.autoBuyDelay;
+    // For Generator 1, use the max level from getGenerator1MaxLevels()
+    if (currentServer === 'generator1') {
+        return getGenerator1MaxLevels().autoBuyDelay;
+    }
+    // For other generators (future)
+    return 21;
+}
+
+// Check if all Generator 1 upgrades are maxed (required for prestige)
+function isGenerator1AllMaxed() {
+    const gen = gameState.generators.generator1;
+    if (!gen) return false;
+    
+    const maxLevels = getGenerator1MaxLevels();
+    
+    // Check bots
+    if ((gen.bots || 0) < maxLevels.bots) return false;
+    
+    // Check efficiency
+    const efficiencyLevel = Math.floor(Math.log((gen.efficiency || 1.0) / 1.0) / Math.log(1.1));
+    if (efficiencyLevel < maxLevels.efficiency) return false;
+    
+    // Check bot speed
+    if ((gen.botSpeed || 0) < maxLevels.botSpeed) return false;
+    
+    // Check auto-buy delay
+    if ((gen.autoBuyDelayLevel || 0) < maxLevels.autoBuyDelay) return false;
+    
+    // Check auto-buy is purchased
+    if (!gen.autoBuyPurchased) return false;
+    
+    return true;
+}
+
+// Calculate prestige cost for a generator
+function getPrestigeCost(generatorId) {
+    if (generatorId === 'generator1') {
+        const baseCost = GENERATOR_COSTS.generator1; // 1000
+        const prestigeLevel = gameState.generators.generator1?.prestigeLevel || 0;
+        
+        if (prestigeLevel === 0) {
+            // First prestige: 100x unlock cost
+            return baseCost * 100;
+        } else {
+            // Subsequent prestiges: 100x previous prestige cost
+            // Previous cost = baseCost * (100 ^ prestigeLevel)
+            // New cost = baseCost * (100 ^ (prestigeLevel + 1))
+            return baseCost * Math.pow(100, prestigeLevel + 1);
+        }
+    } else if (generatorId === 'generator2') {
+        const baseCost = GENERATOR_COSTS.generator2; // 10000
+        const prestigeLevel = gameState.generators.generator2?.prestigeLevel || 0;
+        
+        if (prestigeLevel === 0) {
+            // First prestige: 100x unlock cost
+            return baseCost * 100;
+        } else {
+            // Subsequent prestiges: 100x previous prestige cost
+            // Previous cost = baseCost * (100 ^ prestigeLevel)
+            // New cost = baseCost * (100 ^ (prestigeLevel + 1))
+            return baseCost * Math.pow(100, prestigeLevel + 1);
+        }
+    }
+    return Infinity; // Other generators not implemented yet
+}
+
+// Prestige a generator
+function prestigeGenerator(generatorId) {
+    if (generatorId === 'generator1') {
+        // Check if all upgrades are maxed
+        if (!isGenerator1AllMaxed()) return false;
+        
+        const cost = getPrestigeCost('generator1');
+        const totalMessages = gameState.messages + (gameState.fractionalMessages || 0);
+        
+        if (totalMessages < cost) return false;
+        
+        // Deduct cost
+        if (gameState.fractionalMessages >= cost) {
+            gameState.fractionalMessages -= cost;
+        } else {
+            const remaining = cost - gameState.fractionalMessages;
+            gameState.fractionalMessages = 0;
+            gameState.messages -= remaining;
+        }
+        
+        const gen = gameState.generators.generator1;
+        
+        // Reset all upgrades
+        gen.bots = 0;
+        gen.efficiency = 1.0;
+        gen.botSpeed = 0;
+        gen.autoBuy = false;
+        gen.autoBuyPurchased = false;
+        gen.autoBuyDelayLevel = 0;
+        
+        // Increase prestige level (this automatically increases max levels via getGenerator1MaxLevels)
+        gen.prestigeLevel = (gen.prestigeLevel || 0) + 1;
+        
+        autoSave();
+        updateCurrencyDisplay();
+        
+        // Refresh UI if on generator1 general channel
+        if (currentServer === 'generator1' && currentChannel === 'general') {
+            loadChannel('general');
+        }
+        
+        return true;
+    } else if (generatorId === 'generator2') {
+        // Check if all upgrades are maxed
+        if (!isGenerator2AllMaxed()) return false;
+        
+        const cost = getPrestigeCost('generator2');
+        const totalMessages = gameState.messages + (gameState.fractionalMessages || 0);
+        
+        if (totalMessages < cost) return false;
+        
+        // Deduct cost
+        if (gameState.fractionalMessages >= cost) {
+            gameState.fractionalMessages -= cost;
+        } else {
+            const remaining = cost - gameState.fractionalMessages;
+            gameState.fractionalMessages = 0;
+            gameState.messages -= remaining;
+        }
+        
+        const gen2 = gameState.generators.generator2;
+        
+        // Reset all upgrades
+        gen2.cascades = 0;
+        gen2.cascadeEfficiency = 0.1;
+        gen2.autoBuy = false;
+        gen2.autoBuyPurchased = false;
+        gen2.autoBuyDelayLevel = 0;
+        
+        // Increase prestige level (this automatically increases max levels via getGenerator2MaxLevels)
+        gen2.prestigeLevel = (gen2.prestigeLevel || 0) + 1;
+        
+        autoSave();
+        updateCurrencyDisplay();
+        
+        // Refresh UI if on generator2 general channel
+        if (currentServer === 'generator2' && currentChannel === 'general') {
+            loadChannel('general');
+        }
+        
+        return true;
+    }
+    return false;
 }
 
 // Get auto-buy delay upgrade cost
@@ -1893,7 +3139,8 @@ function purchaseBot(generatorId) {
     
     // Check max bot limit
     const currentBots = gen.bots || 0;
-    if (generatorId === 'generator1' && currentBots >= GENERATOR1_MAX_LEVELS.bots) {
+    const maxLevels = getGenerator1MaxLevels();
+    if (generatorId === 'generator1' && currentBots >= maxLevels.bots) {
         return; // Already at max
     }
     
@@ -1917,12 +3164,9 @@ function purchaseBot(generatorId) {
         autoSave();
         updateCurrencyDisplay();
         
-        // Only refresh UI if on a channel that displays bot stats
-        if (currentServer === 'generator1' && currentChannel === 'upgrades') {
+        // Only refresh UI if on upgrades channel
+        if (currentServer === 'generator1' && currentChannel === 'general') {
             updateUpgradeButtonStates();
-        } else if (currentServer === 'generator1' && currentChannel === 'main') {
-            // Main channel shows bot stats, so refresh it
-            loadChannel(currentChannel);
         }
         // Otherwise, just update currency (no UI refresh needed)
     }
@@ -1940,7 +3184,8 @@ function upgradeBotEfficiency(generatorId) {
         const currentEfficiency = gen.efficiency || 1.0;
         // Calculate level from efficiency: efficiency = 1.0 * (1.1 ^ level)
         const currentLevel = Math.floor(Math.log(currentEfficiency / 1.0) / Math.log(1.1));
-        if (currentLevel >= GENERATOR1_MAX_LEVELS.efficiency) {
+        const maxLevels = getGenerator1MaxLevels();
+        if (currentLevel >= maxLevels.efficiency) {
             return; // Already at max
         }
     }
@@ -1963,12 +3208,9 @@ function upgradeBotEfficiency(generatorId) {
         autoSave();
         updateCurrencyDisplay();
         
-        // Only refresh UI if on a channel that displays bot stats
-        if (currentServer === 'generator1' && currentChannel === 'upgrades') {
+        // Only refresh UI if on upgrades channel
+        if (currentServer === 'generator1' && currentChannel === 'general') {
             updateUpgradeButtonStates();
-        } else if (currentServer === 'generator1' && currentChannel === 'main') {
-            // Main channel shows bot stats, so refresh it
-            loadChannel(currentChannel);
         }
         // Otherwise, just update currency (no UI refresh needed)
     }
@@ -2593,8 +3835,14 @@ function setupSettingsHandlers() {
                             }
                             // Initialize generator1 if unlocked
                             if (isGeneratorUnlocked('generator1') && !gameState.generators.generator1) {
-                                gameState.generators.generator1 = { bots: 0, efficiency: 1.0, botSpeed: 0, autoBuy: false, autoBuyPurchased: false, autoBuyDelayLevel: 0 };
+                                gameState.generators.generator1 = { bots: 0, efficiency: 1.0, botSpeed: 0, autoBuy: false, autoBuyPurchased: false, autoBuyDelayLevel: 0, prestigeLevel: 0 };
                             }
+                            // Assign names to unlocked generators if they don't have one
+                            ['generator1', 'generator2', 'generator3'].forEach(genId => {
+                                if (isGeneratorUnlocked(genId)) {
+                                    assignRandomServerName(genId);
+                                }
+                            });
                             saveSettings();
                             updateCurrencyDisplay();
                             renderServerSidebar();
@@ -2617,14 +3865,19 @@ function setupSettingsHandlers() {
     if (resetBtn) {
         resetBtn.addEventListener('click', () => {
             if (confirm('Are you sure you want to reset your game? This cannot be undone!')) {
+                // Preserve settings (colors, number format, etc.)
+                const preservedSettings = { ...gameState.settings };
+                
+                // Reset game state
                 gameState.messages = 0;
                 gameState.fractionalMessages = 0;
                 gameState.lifetimeMessages = 0;
                 gameState.playtime = 0;
                 gameState.sessionStartTime = Date.now();
-                gameState.settings = {
-                    numberFormat: 'full'
-                };
+                
+                // Restore preserved settings
+                gameState.settings = preservedSettings;
+                
                 gameState.upgrades = {
                     manualGenerationMultiplier: 0,
                     autoGenerationBoost: 0,
@@ -2633,16 +3886,35 @@ function setupSettingsHandlers() {
                 };
                 gameState.generators = {
                     unlocked: [],
-                    generator1: { bots: 0, efficiency: 1.0, botSpeed: 0, autoBuy: false, autoBuyPurchased: false, autoBuyDelayLevel: 0 }
+                    generator1: { bots: 0, efficiency: 1.0, botSpeed: 0, autoBuy: false, autoBuyPurchased: false, autoBuyDelayLevel: 0, prestigeLevel: 0 }
                 };
-                localStorage.removeItem('gameSettings');
+                
+                // Only remove gameState from localStorage, keep gameSettings
                 localStorage.removeItem('gameState');
+                
+                // Save the reset game state (with preserved settings)
+                autoSave();
                 saveSettings();
+                
+                // Reapply colors in case they were changed
+                applyColors();
+                
                 updateCurrencyDisplay();
                 renderServerSidebar();
                 alert('Game reset!');
                 loadChannel(currentChannel);
             }
+        });
+    }
+    
+    // Debug: Add messages
+    const debugAddMessagesBtn = document.getElementById('debug-add-messages');
+    if (debugAddMessagesBtn) {
+        debugAddMessagesBtn.addEventListener('click', () => {
+            gameState.messages += 10000;
+            autoSave();
+            updateCurrencyDisplay();
+            updateUpgradeButtonStates();
         });
     }
 }
@@ -2782,7 +4054,8 @@ function upgradeBotSpeed(generatorId) {
     const currentLevel = gen.botSpeed || 0;
     
     // Check max level limit for Generator 1
-    if (generatorId === 'generator1' && currentLevel >= GENERATOR1_MAX_LEVELS.botSpeed) {
+    const maxLevels = getGenerator1MaxLevels();
+    if (generatorId === 'generator1' && currentLevel >= maxLevels.botSpeed) {
         return; // Already at max
     }
     
@@ -2803,12 +4076,9 @@ function upgradeBotSpeed(generatorId) {
         autoSave();
         updateCurrencyDisplay();
         
-        // Only refresh UI if on a channel that displays bot stats
-        if (currentServer === 'generator1' && currentChannel === 'upgrades') {
+        // Only refresh UI if on upgrades channel
+        if (currentServer === 'generator1' && currentChannel === 'general') {
             updateUpgradeButtonStates();
-        } else if (currentServer === 'generator1' && currentChannel === 'main') {
-            // Main channel shows bot stats, so refresh it
-            loadChannel(currentChannel);
         }
         // Otherwise, just update currency (no UI refresh needed)
     }
@@ -2839,12 +4109,9 @@ function purchaseAutoBuy(generatorId) {
         autoSave();
         updateCurrencyDisplay();
         
-        // Only refresh UI if on a channel that displays bot stats
-        if (currentServer === 'generator1' && currentChannel === 'upgrades') {
-            updateUpgradeButtonStates();
-        } else if (currentServer === 'generator1' && currentChannel === 'main') {
-            // Main channel shows bot stats, so refresh it
-            loadChannel(currentChannel);
+        // Refresh UI if on upgrades channel to show toggle button
+        if (currentServer === 'generator1' && currentChannel === 'general') {
+            loadChannel('general');
         }
         // Otherwise, just update currency (no UI refresh needed)
     }
@@ -2861,12 +4128,9 @@ function toggleAutoBuy(generatorId) {
     autoSave();
     
     // Only refresh UI if on a channel that displays bot stats
-    if (currentServer === 'generator1' && currentChannel === 'upgrades') {
+    if (currentServer === 'generator1' && currentChannel === 'general') {
         updateUpgradeButtonStates();
-    } else if (currentServer === 'generator1' && currentChannel === 'main') {
-        // Main channel shows bot stats, so refresh it
-        loadChannel(currentChannel);
-    }
+        }
     // Otherwise, just update currency (no UI refresh needed)
 }
 
@@ -2880,7 +4144,8 @@ function upgradeAutoBuyDelay(generatorId) {
     const currentLevel = gen.autoBuyDelayLevel || 0;
     
     // Check max level limit for Generator 1
-    if (generatorId === 'generator1' && currentLevel >= GENERATOR1_MAX_LEVELS.autoBuyDelay) {
+    const maxLevels = getGenerator1MaxLevels();
+    if (generatorId === 'generator1' && currentLevel >= maxLevels.autoBuyDelay) {
         return; // Already at max
     }
     
@@ -2910,12 +4175,9 @@ function upgradeAutoBuyDelay(generatorId) {
         autoSave();
         updateCurrencyDisplay();
         
-        // Only refresh UI if on a channel that displays bot stats
-        if (currentServer === 'generator1' && currentChannel === 'upgrades') {
+        // Only refresh UI if on upgrades channel
+        if (currentServer === 'generator1' && currentChannel === 'general') {
             updateUpgradeButtonStates();
-        } else if (currentServer === 'generator1' && currentChannel === 'main') {
-            // Main channel shows bot stats, so refresh it
-            loadChannel(currentChannel);
         }
         // Otherwise, just update currency (no UI refresh needed)
     }
@@ -2937,6 +4199,21 @@ function renderChangelog() {
     // Changelog data - add entries here in reverse chronological order (newest first)
     // Use new Date() to get the current date when the entry is created
     const changelog = [
+        {
+            version: 'beta 1.0.2',
+            date: formatDate(new Date()), // Today's date
+            changes: [
+                'Added server prestige system - reset generator upgrades to increase max levels by 10',
+                'Added prestige level display to stats channel',
+                'Generator servers now use random Discord-style names that persist across saves',
+                'Fixed bug where resetting the game would also reset user settings',
+                'Added Generator 2: Message Cascade system (unlocks at 10,000 messages)',
+                'Generator 2 cascades cost 1 bot from Generator 1 + messages, generate 10% of Generator 1\'s base production',
+                'Added upgrades for Generator 2: Cascade Efficiency, Auto-Buy Cascades, Auto-Buy Speed',
+                'Generator 2 upgrades have 10x costs and max levels (50 cascades, 10 levels for efficiency/delay)',
+                'Added prestige system for Generator 2, costing 100x unlock cost then 100x previous prestige cost'
+            ]
+        },
         {
             version: 'beta 1.0.1',
             date: formatDate(new Date()), // Today's date
