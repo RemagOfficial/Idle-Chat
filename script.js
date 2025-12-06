@@ -19,7 +19,9 @@ let gameState = {
     playtime: 0, // Total playtime in milliseconds
     sessionStartTime: Date.now(), // When current session started
     settings: {
-        numberFormat: 'full' // 'full', 'abbreviated', 'scientific'
+        numberFormat: 'full', // 'full', 'abbreviated', 'scientific'
+        backgroundColor: '#36393f', // Default Discord dark gray
+        accentColor: '#5865f2' // Default Discord blue
     },
     upgrades: {
         manualGenerationMultiplier: 0, // Level of manual generation multiplier upgrade
@@ -46,15 +48,36 @@ function loadSettings() {
     if (saved) {
         try {
             const parsed = JSON.parse(saved);
-            gameState.settings = { ...gameState.settings, ...parsed };
+            // Merge saved settings, preserving color settings if they exist
+            gameState.settings = { 
+                ...gameState.settings, 
+                ...parsed,
+                // Preserve color settings if they were saved
+                backgroundColor: parsed.backgroundColor || gameState.settings.backgroundColor || '#36393f',
+                accentColor: parsed.accentColor || gameState.settings.accentColor || '#5865f2'
+            };
         } catch (e) {
             console.error('Failed to load settings:', e);
         }
+    }
+    // Ensure color settings exist with defaults
+    if (!gameState.settings.backgroundColor) {
+        gameState.settings.backgroundColor = '#36393f';
+    }
+    if (!gameState.settings.accentColor) {
+        gameState.settings.accentColor = '#5865f2';
     }
 }
 
 // Save settings to localStorage
 function saveSettings() {
+    // Ensure color settings are included before saving
+    if (!gameState.settings.backgroundColor) {
+        gameState.settings.backgroundColor = '#36393f';
+    }
+    if (!gameState.settings.accentColor) {
+        gameState.settings.accentColor = '#5865f2';
+    }
     localStorage.setItem('gameSettings', JSON.stringify(gameState.settings));
 }
 
@@ -233,10 +256,26 @@ function unlockGenerator(generatorId) {
         
         // Initialize generator if needed
         if (!gameState.generators[generatorId]) {
-            gameState.generators[generatorId] = {
-                bots: 0,
-                efficiency: 1.0
-            };
+            if (generatorId === 'generator1') {
+                gameState.generators[generatorId] = {
+                    bots: 1, // Give 1 free bot when unlocking
+                    efficiency: 1.0,
+                    botSpeed: 0,
+                    autoBuy: false,
+                    autoBuyPurchased: false,
+                    autoBuyDelayLevel: 0
+                };
+            } else {
+                gameState.generators[generatorId] = {
+                    bots: 0,
+                    efficiency: 1.0
+                };
+            }
+        } else if (generatorId === 'generator1') {
+            // If generator already exists but has 0 bots, give the free bot
+            if (gameState.generators[generatorId].bots === 0) {
+                gameState.generators[generatorId].bots = 1;
+            }
         }
         
         autoSave();
@@ -354,6 +393,9 @@ function init() {
     if (!gameState.sessionStartTime) {
         gameState.sessionStartTime = Date.now();
     }
+    
+    // Apply colors after settings are loaded
+    applyColors();
     
     renderServerSidebar();
     setupChannelItems();
@@ -489,45 +531,64 @@ function updateUpgradeButtonStates() {
         // Buy Bot button
         const buyBotBtn = document.getElementById('buy-bot');
         if (buyBotBtn) {
-            const botCost = Math.floor(getBotCost(gen.bots || 0) * getCostReductionMultiplier());
-            const canAfford = totalMessages >= botCost;
-            buyBotBtn.disabled = !canAfford;
-            buyBotBtn.classList.toggle('disabled', !canAfford);
-            const costSpan = buyBotBtn.querySelector('.upgrade-button-cost');
-            if (costSpan) costSpan.textContent = `${formatNumber(botCost, 2)} Messages`;
+            const currentBots = gen.bots || 0;
+            const isMaxBots = currentBots >= GENERATOR1_MAX_LEVELS.bots;
+            if (isMaxBots) {
+                buyBotBtn.disabled = true;
+                buyBotBtn.classList.add('disabled');
+                const costSpan = buyBotBtn.querySelector('.upgrade-button-cost');
+                if (costSpan) costSpan.textContent = 'Max Level';
+            } else {
+                // Calculate cost: if they have 1 bot (the free one), next bot costs 1000 (bot #0 cost)
+                const costBots = currentBots === 1 ? 0 : currentBots;
+                const botCost = Math.floor(getBotCost(costBots) * getCostReductionMultiplier());
+                const canAfford = totalMessages >= botCost;
+                buyBotBtn.disabled = !canAfford;
+                buyBotBtn.classList.toggle('disabled', !canAfford);
+                const costSpan = buyBotBtn.querySelector('.upgrade-button-cost');
+                if (costSpan) costSpan.textContent = `${formatNumber(botCost, 2)} Messages`;
+            }
         }
         
         // Efficiency button
         const efficiencyBtn = document.getElementById('upgrade-efficiency');
         if (efficiencyBtn) {
-            const efficiencyCost = Math.floor(getEfficiencyUpgradeCost(gen.efficiency || 1.0) * getCostReductionMultiplier());
-            const canAfford = totalMessages >= efficiencyCost;
-            efficiencyBtn.disabled = !canAfford;
-            efficiencyBtn.classList.toggle('disabled', !canAfford);
-            const costSpan = efficiencyBtn.querySelector('.upgrade-button-cost');
-            if (costSpan) costSpan.textContent = `${formatNumber(efficiencyCost, 2)} Messages`;
+            const currentEfficiency = gen.efficiency || 1.0;
+            const currentLevel = Math.floor(Math.log(currentEfficiency / 1.0) / Math.log(1.1));
+            const isMaxLevel = currentLevel >= GENERATOR1_MAX_LEVELS.efficiency;
+            if (isMaxLevel) {
+                efficiencyBtn.disabled = true;
+                efficiencyBtn.classList.add('disabled');
+                const costSpan = efficiencyBtn.querySelector('.upgrade-button-cost');
+                if (costSpan) costSpan.textContent = 'Max Level';
+            } else {
+                const efficiencyCost = Math.floor(getEfficiencyUpgradeCost(currentEfficiency) * getCostReductionMultiplier());
+                const canAfford = totalMessages >= efficiencyCost;
+                efficiencyBtn.disabled = !canAfford;
+                efficiencyBtn.classList.toggle('disabled', !canAfford);
+                const costSpan = efficiencyBtn.querySelector('.upgrade-button-cost');
+                if (costSpan) costSpan.textContent = `${formatNumber(efficiencyCost, 2)} Messages`;
+            }
         }
         
         // Bot Speed button
         const botSpeedBtn = document.getElementById('upgrade-bot-speed');
         if (botSpeedBtn) {
-            const botSpeedCost = Math.floor(getBotSpeedCost(gen.botSpeed || 0) * getCostReductionMultiplier());
-            const canAfford = totalMessages >= botSpeedCost;
-            botSpeedBtn.disabled = !canAfford;
-            botSpeedBtn.classList.toggle('disabled', !canAfford);
-            const costSpan = botSpeedBtn.querySelector('.upgrade-button-cost');
-            if (costSpan) costSpan.textContent = `${formatNumber(botSpeedCost, 2)} Messages`;
-        }
-        
-        // Auto-Buy button (only if not purchased)
-        const buyAutoBuyBtn = document.getElementById('buy-auto-buy');
-        if (buyAutoBuyBtn) {
-            const autoBuyCost = 5000;
-            const canAfford = totalMessages >= autoBuyCost && !gen.autoBuyPurchased;
-            buyAutoBuyBtn.disabled = !canAfford;
-            buyAutoBuyBtn.classList.toggle('disabled', !canAfford);
-            const costSpan = buyAutoBuyBtn.querySelector('.upgrade-button-cost');
-            if (costSpan) costSpan.textContent = `${formatNumber(autoBuyCost, 2)} Messages`;
+            const currentLevel = gen.botSpeed || 0;
+            const isMaxLevel = currentLevel >= GENERATOR1_MAX_LEVELS.botSpeed;
+            if (isMaxLevel) {
+                botSpeedBtn.disabled = true;
+                botSpeedBtn.classList.add('disabled');
+                const costSpan = botSpeedBtn.querySelector('.upgrade-button-cost');
+                if (costSpan) costSpan.textContent = 'Max Level';
+            } else {
+                const botSpeedCost = Math.floor(getBotSpeedCost(currentLevel) * getCostReductionMultiplier());
+                const canAfford = totalMessages >= botSpeedCost;
+                botSpeedBtn.disabled = !canAfford;
+                botSpeedBtn.classList.toggle('disabled', !canAfford);
+                const costSpan = botSpeedBtn.querySelector('.upgrade-button-cost');
+                if (costSpan) costSpan.textContent = `${formatNumber(botSpeedCost, 2)} Messages`;
+            }
         }
         
         // Auto-Buy Delay button
@@ -536,7 +597,12 @@ function updateUpgradeButtonStates() {
             const autoBuyDelayLevel = gen.autoBuyDelayLevel || 0;
             const maxLevel = getMaxAutoBuyDelayLevel();
             const isMaxLevel = autoBuyDelayLevel >= maxLevel;
-            if (!isMaxLevel) {
+            if (isMaxLevel) {
+                autoBuyDelayBtn.disabled = true;
+                autoBuyDelayBtn.classList.add('disabled');
+                const costSpan = autoBuyDelayBtn.querySelector('.upgrade-button-cost');
+                if (costSpan) costSpan.textContent = 'Max Level';
+            } else {
                 const autoBuyDelayCost = Math.floor(getAutoBuyDelayCost(autoBuyDelayLevel) * getCostReductionMultiplier());
                 const canAfford = totalMessages >= autoBuyDelayCost;
                 autoBuyDelayBtn.disabled = !canAfford;
@@ -565,6 +631,14 @@ function updateUpgradeButtonStates() {
             if (valueSpan) valueSpan.textContent = `${formatNumber((gen.efficiency || 1.0) * 100, 0)}%`;
         }
         
+        // Update efficiency level display
+        const efficiencyLevelDisplay = document.querySelector('#upgrade-efficiency')?.closest('.upgrade-item')?.querySelector('.upgrade-level');
+        if (efficiencyLevelDisplay) {
+            const currentEfficiency = gen.efficiency || 1.0;
+            const efficiencyLevel = Math.floor(Math.log(currentEfficiency / 1.0) / Math.log(1.1));
+            efficiencyLevelDisplay.textContent = `Level ${efficiencyLevel}`;
+        }
+        
         // Update bot speed stat
         const botSpeedStat = Array.from(document.querySelectorAll('.upgrade-stat')).find(stat => 
             stat.querySelector('.stat-label')?.textContent === 'Current Speed:'
@@ -572,6 +646,27 @@ function updateUpgradeButtonStates() {
         if (botSpeedStat) {
             const valueSpan = botSpeedStat.querySelector('.stat-value');
             if (valueSpan) valueSpan.textContent = `${formatNumber(1.0 * Math.pow(1.1, gen.botSpeed || 0), 2)} msg/s per bot`;
+        }
+        
+        // Update bot speed level display
+        const botSpeedLevelDisplay = document.querySelector('#upgrade-bot-speed')?.closest('.upgrade-item')?.querySelector('.upgrade-level');
+        if (botSpeedLevelDisplay) {
+            const botSpeedLevel = gen.botSpeed || 0;
+            botSpeedLevelDisplay.textContent = `Level ${botSpeedLevel}`;
+        }
+        
+        // Update bot description (messages per second per bot)
+        const botDescription = document.querySelector('#buy-bot')?.closest('.upgrade-item')?.querySelector('.upgrade-description');
+        if (botDescription) {
+            // Calculate msg per bot with all upgrades (speed, efficiency, auto-gen boost, message multiplier)
+            const baseMsgPerBot = 1.0 * Math.pow(1.1, gen.botSpeed || 0);
+            const withEfficiency = baseMsgPerBot * (gen.efficiency || 1.0);
+            const autoBoostLevel = gameState.upgrades.autoGenerationBoost || 0;
+            const autoBoostMultiplier = Math.pow(1.1, autoBoostLevel);
+            const messageMultiplierLevel = gameState.upgrades.messageMultiplier || 0;
+            const messageMultiplier = Math.pow(1.05, messageMultiplierLevel);
+            const finalMsgPerBot = withEfficiency * autoBoostMultiplier * messageMultiplier;
+            botDescription.textContent = `Purchase a new bot to automatically generate messages. Each bot produces ${formatNumber(finalMsgPerBot, 2)} messages per second (after upgrades).`;
         }
         
         // Update auto-buy status
@@ -601,54 +696,128 @@ function updateUpgradeButtonStates() {
             const isMaxLevel = autoBuyDelayLevel >= maxLevel;
             autoBuyDelayLevelDisplay.textContent = isMaxLevel ? 'Max Level' : `Level ${autoBuyDelayLevel}`;
         }
+        
+        // Update auto-buy delay description
+        const autoBuyDelayItem = document.querySelector('#upgrade-auto-buy-delay')?.closest('.upgrade-item');
+        if (autoBuyDelayItem) {
+            const autoBuyDelayDescription = autoBuyDelayItem.querySelector('.upgrade-description');
+            if (autoBuyDelayDescription) {
+                const delay = getAutoBuyDelay(gen.autoBuyDelayLevel || 0);
+                autoBuyDelayDescription.textContent = `Reduces the delay between auto-buy purchases. Current delay: ${formatNumber(delay, 1)}s`;
+            }
+        }
+        
+        // Auto-Buy button (update purchase button state and toggle button visibility)
+        const buyAutoBuyBtn = document.getElementById('buy-auto-buy');
+        const toggleAutoBuyBtn = document.getElementById('toggle-auto-buy');
+        
+        if (gen.autoBuyPurchased) {
+            // If purchased, show toggle button and hide purchase button
+            if (buyAutoBuyBtn) {
+                buyAutoBuyBtn.style.display = 'none';
+            }
+            if (toggleAutoBuyBtn) {
+                toggleAutoBuyBtn.style.display = 'block';
+                const buttonText = toggleAutoBuyBtn.querySelector('.upgrade-button-text');
+                if (buttonText) {
+                    buttonText.textContent = gen.autoBuy ? 'Disable Auto-Buy' : 'Enable Auto-Buy';
+                }
+            }
+        } else {
+            // If not purchased, show purchase button and hide toggle button
+            if (toggleAutoBuyBtn) {
+                toggleAutoBuyBtn.style.display = 'none';
+            }
+            if (buyAutoBuyBtn) {
+                buyAutoBuyBtn.style.display = 'block';
+                const autoBuyCost = 5000;
+                const canAfford = totalMessages >= autoBuyCost;
+                buyAutoBuyBtn.disabled = !canAfford;
+                buyAutoBuyBtn.classList.toggle('disabled', !canAfford);
+                const costSpan = buyAutoBuyBtn.querySelector('.upgrade-button-cost');
+                if (costSpan) costSpan.textContent = `${formatNumber(autoBuyCost, 2)} Messages`;
+            }
+        }
     } else if (currentServer === 'upgrades' && currentChannel === 'global1') {
         // Global upgrades
         // Manual Generation Multiplier
         const manualMultiplierBtn = document.getElementById('buy-manual-multiplier');
         if (manualMultiplierBtn) {
             const multiplierLevel = gameState.upgrades.manualGenerationMultiplier || 0;
-            const upgradeCost = Math.floor(getManualGenerationUpgradeCost(multiplierLevel) * getCostReductionMultiplier());
-            const canAfford = totalMessages >= upgradeCost;
-            manualMultiplierBtn.disabled = !canAfford;
-            manualMultiplierBtn.classList.toggle('disabled', !canAfford);
-            const costSpan = manualMultiplierBtn.querySelector('.upgrade-button-cost');
-            if (costSpan) costSpan.textContent = `${formatNumber(upgradeCost, 2)} Messages`;
+            const isMaxLevel = multiplierLevel >= GLOBAL_UPGRADE_MAX_LEVELS.manualGenerationMultiplier;
+            if (isMaxLevel) {
+                manualMultiplierBtn.disabled = true;
+                manualMultiplierBtn.classList.add('disabled');
+                const costSpan = manualMultiplierBtn.querySelector('.upgrade-button-cost');
+                if (costSpan) costSpan.textContent = 'Max Level';
+            } else {
+                const upgradeCost = Math.floor(getManualGenerationUpgradeCost(multiplierLevel) * getCostReductionMultiplier());
+                const canAfford = totalMessages >= upgradeCost;
+                manualMultiplierBtn.disabled = !canAfford;
+                manualMultiplierBtn.classList.toggle('disabled', !canAfford);
+                const costSpan = manualMultiplierBtn.querySelector('.upgrade-button-cost');
+                if (costSpan) costSpan.textContent = `${formatNumber(upgradeCost, 2)} Messages`;
+            }
         }
         
         // Auto-Generation Boost
         const autoBoostBtn = document.getElementById('buy-auto-boost');
         if (autoBoostBtn) {
             const autoBoostLevel = gameState.upgrades.autoGenerationBoost || 0;
-            const autoBoostCost = Math.floor(getAutoGenerationBoostCost(autoBoostLevel) * getCostReductionMultiplier());
-            const canAfford = totalMessages >= autoBoostCost;
-            autoBoostBtn.disabled = !canAfford;
-            autoBoostBtn.classList.toggle('disabled', !canAfford);
-            const costSpan = autoBoostBtn.querySelector('.upgrade-button-cost');
-            if (costSpan) costSpan.textContent = `${formatNumber(autoBoostCost, 2)} Messages`;
+            const isMaxLevel = autoBoostLevel >= GLOBAL_UPGRADE_MAX_LEVELS.autoGenerationBoost;
+            if (isMaxLevel) {
+                autoBoostBtn.disabled = true;
+                autoBoostBtn.classList.add('disabled');
+                const costSpan = autoBoostBtn.querySelector('.upgrade-button-cost');
+                if (costSpan) costSpan.textContent = 'Max Level';
+            } else {
+                const autoBoostCost = Math.floor(getAutoGenerationBoostCost(autoBoostLevel) * getCostReductionMultiplier());
+                const canAfford = totalMessages >= autoBoostCost;
+                autoBoostBtn.disabled = !canAfford;
+                autoBoostBtn.classList.toggle('disabled', !canAfford);
+                const costSpan = autoBoostBtn.querySelector('.upgrade-button-cost');
+                if (costSpan) costSpan.textContent = `${formatNumber(autoBoostCost, 2)} Messages`;
+            }
         }
         
         // Message Multiplier
         const messageMultiplierBtn = document.getElementById('buy-message-multiplier');
         if (messageMultiplierBtn) {
             const messageMultiplierLevel = gameState.upgrades.messageMultiplier || 0;
-            const messageMultiplierCost = Math.floor(getMessageMultiplierCost(messageMultiplierLevel) * getCostReductionMultiplier());
-            const canAfford = totalMessages >= messageMultiplierCost;
-            messageMultiplierBtn.disabled = !canAfford;
-            messageMultiplierBtn.classList.toggle('disabled', !canAfford);
-            const costSpan = messageMultiplierBtn.querySelector('.upgrade-button-cost');
-            if (costSpan) costSpan.textContent = `${formatNumber(messageMultiplierCost, 2)} Messages`;
+            const isMaxLevel = messageMultiplierLevel >= GLOBAL_UPGRADE_MAX_LEVELS.messageMultiplier;
+            if (isMaxLevel) {
+                messageMultiplierBtn.disabled = true;
+                messageMultiplierBtn.classList.add('disabled');
+                const costSpan = messageMultiplierBtn.querySelector('.upgrade-button-cost');
+                if (costSpan) costSpan.textContent = 'Max Level';
+            } else {
+                const messageMultiplierCost = Math.floor(getMessageMultiplierCost(messageMultiplierLevel) * getCostReductionMultiplier());
+                const canAfford = totalMessages >= messageMultiplierCost;
+                messageMultiplierBtn.disabled = !canAfford;
+                messageMultiplierBtn.classList.toggle('disabled', !canAfford);
+                const costSpan = messageMultiplierBtn.querySelector('.upgrade-button-cost');
+                if (costSpan) costSpan.textContent = `${formatNumber(messageMultiplierCost, 2)} Messages`;
+            }
         }
         
         // Cost Efficiency
         const costEfficiencyBtn = document.getElementById('buy-cost-efficiency');
         if (costEfficiencyBtn) {
             const costEfficiencyLevel = gameState.upgrades.costEfficiency || 0;
-            const costEfficiencyCost = Math.floor(getCostEfficiencyCost(costEfficiencyLevel) * getCostReductionMultiplier());
-            const canAfford = totalMessages >= costEfficiencyCost;
-            costEfficiencyBtn.disabled = !canAfford;
-            costEfficiencyBtn.classList.toggle('disabled', !canAfford);
-            const costSpan = costEfficiencyBtn.querySelector('.upgrade-button-cost');
-            if (costSpan) costSpan.textContent = `${formatNumber(costEfficiencyCost, 2)} Messages`;
+            const isMaxLevel = costEfficiencyLevel >= GLOBAL_UPGRADE_MAX_LEVELS.costEfficiency;
+            if (isMaxLevel) {
+                costEfficiencyBtn.disabled = true;
+                costEfficiencyBtn.classList.add('disabled');
+                const costSpan = costEfficiencyBtn.querySelector('.upgrade-button-cost');
+                if (costSpan) costSpan.textContent = 'Max Level';
+            } else {
+                const costEfficiencyCost = Math.floor(getCostEfficiencyCost(costEfficiencyLevel) * getCostReductionMultiplier());
+                const canAfford = totalMessages >= costEfficiencyCost;
+                costEfficiencyBtn.disabled = !canAfford;
+                costEfficiencyBtn.classList.toggle('disabled', !canAfford);
+                const costSpan = costEfficiencyBtn.querySelector('.upgrade-button-cost');
+                if (costSpan) costSpan.textContent = `${formatNumber(costEfficiencyCost, 2)} Messages`;
+            }
         }
     }
 }
@@ -898,9 +1067,11 @@ function loadChannel(channelId) {
     
     // Special layout for manual generation channel
     if (channelId === 'manual' && currentServer === 'home') {
-        const multiplier = getManualGenerationMultiplier();
-        const avgMessages = formatNumber(multiplier, 2);
-        const messageText = multiplier > 1.00 ? 'Messages' : 'Message';
+        const manualMultiplier = getManualGenerationMultiplier();
+        const globalMultiplier = getGlobalMessageMultiplier();
+        const totalMultiplier = manualMultiplier * globalMultiplier;
+        const avgMessages = formatNumber(totalMultiplier, 2);
+        const messageText = totalMultiplier > 1.00 ? 'Messages' : 'Message';
         contentBody.innerHTML = `
             <div class="manual-generation-content">
                 <div class="manual-generation-info">
@@ -943,7 +1114,7 @@ function loadChannel(channelId) {
             <div class="generator-content">
                 <div class="generator-info">
                     <h2>Auto-Typer Bot</h2>
-                    <p>Automatically generates messages for you. Each bot produces ${formatNumber(msgPerBot * (gen.efficiency || 1.0), 2)} messages per second.</p>
+                    <p>Automatically generates messages for you. Each bot produces ${formatNumber(msgPerBot * (gen.efficiency || 1.0) * Math.pow(1.1, gameState.upgrades.autoGenerationBoost || 0) * Math.pow(1.05, gameState.upgrades.messageMultiplier || 0), 2)} messages per second.</p>
                 </div>
                 <div class="generator-stats">
                     <div class="generator-stat">
@@ -964,7 +1135,7 @@ function loadChannel(channelId) {
                     </div>
                     <div class="generator-stat">
                         <span class="stat-label">Production Rate:</span>
-                        <span class="stat-value">${formatNumber(production, 2)} msg/s</span>
+                        <span class="stat-value">${formatNumber(production * getGlobalMessageMultiplier(), 2)} msg/s</span>
                     </div>
                 </div>
             </div>
@@ -972,9 +1143,16 @@ function loadChannel(channelId) {
     } else if (channelId === 'upgrades' && currentServer === 'generator1') {
         // Auto-Typer Bot upgrades
         const gen = gameState.generators.generator1 || { bots: 0, efficiency: 1.0, botSpeed: 0, autoBuy: false, autoBuyPurchased: false, autoBuyDelayLevel: 0 };
-        const botCost = Math.floor(getBotCost(gen.bots || 0) * getCostReductionMultiplier());
-        const efficiencyCost = Math.floor(getEfficiencyUpgradeCost(gen.efficiency || 1.0) * getCostReductionMultiplier());
-        const botSpeedCost = Math.floor(getBotSpeedCost(gen.botSpeed || 0) * getCostReductionMultiplier());
+        const currentBots = gen.bots || 0;
+        const isMaxBots = currentBots >= GENERATOR1_MAX_LEVELS.bots;
+        const botCost = isMaxBots ? 0 : Math.floor(getBotCost(currentBots) * getCostReductionMultiplier());
+        const currentEfficiency = gen.efficiency || 1.0;
+        const efficiencyLevel = Math.floor(Math.log(currentEfficiency / 1.0) / Math.log(1.1));
+        const isMaxEfficiency = efficiencyLevel >= GENERATOR1_MAX_LEVELS.efficiency;
+        const efficiencyCost = isMaxEfficiency ? 0 : Math.floor(getEfficiencyUpgradeCost(currentEfficiency) * getCostReductionMultiplier());
+        const botSpeedLevel = gen.botSpeed || 0;
+        const isMaxBotSpeed = botSpeedLevel >= GENERATOR1_MAX_LEVELS.botSpeed;
+        const botSpeedCost = isMaxBotSpeed ? 0 : Math.floor(getBotSpeedCost(botSpeedLevel) * getCostReductionMultiplier());
         const autoBuyCost = 5000;
         const autoBuyDelayLevel = gen.autoBuyDelayLevel || 0;
         const maxDelayLevel = getMaxAutoBuyDelayLevel();
@@ -982,9 +1160,9 @@ function loadChannel(channelId) {
         const autoBuyDelayCost = isMaxDelayLevel ? 0 : Math.floor(getAutoBuyDelayCost(autoBuyDelayLevel) * getCostReductionMultiplier());
         const autoBuyDelay = getAutoBuyDelay(autoBuyDelayLevel);
         const totalMessages = gameState.messages + (gameState.fractionalMessages || 0);
-        const canAffordBot = totalMessages >= botCost;
-        const canAffordEfficiency = totalMessages >= efficiencyCost;
-        const canAffordBotSpeed = totalMessages >= botSpeedCost;
+        const canAffordBot = !isMaxBots && totalMessages >= botCost;
+        const canAffordEfficiency = !isMaxEfficiency && totalMessages >= efficiencyCost;
+        const canAffordBotSpeed = !isMaxBotSpeed && totalMessages >= botSpeedCost;
         const canAffordAutoBuy = totalMessages >= autoBuyCost && !gen.autoBuyPurchased;
         const canAffordAutoBuyDelay = !isMaxDelayLevel && totalMessages >= autoBuyDelayCost;
         
@@ -994,22 +1172,23 @@ function loadChannel(channelId) {
                     <div class="upgrade-header">
                         <h3 class="upgrade-title">Buy Auto-Typer Bot</h3>
                     </div>
-                    <p class="upgrade-description">Purchase a new bot to automatically generate messages. Each bot produces ${formatNumber((1.0 * Math.pow(1.1, gen.botSpeed || 0)) * (gen.efficiency || 1.0), 2)} messages per second (after upgrades).</p>
+                    <p class="upgrade-description">Purchase a new bot to automatically generate messages. Each bot produces ${formatNumber((1.0 * Math.pow(1.1, gen.botSpeed || 0)) * (gen.efficiency || 1.0) * Math.pow(1.1, gameState.upgrades.autoGenerationBoost || 0) * Math.pow(1.05, gameState.upgrades.messageMultiplier || 0), 2)} messages per second (after upgrades).</p>
                     <div class="upgrade-stats">
                         <div class="upgrade-stat">
                             <span class="stat-label">Current Bots:</span>
                             <span class="stat-value">${formatNumber(gen.bots || 0, 0)}</span>
                         </div>
                     </div>
-                    <button class="upgrade-button ${canAffordBot ? '' : 'disabled'}" id="buy-bot" ${!canAffordBot ? 'disabled' : ''}>
+                    <button class="upgrade-button ${canAffordBot && !isMaxBots ? '' : 'disabled'}" id="buy-bot" ${!canAffordBot || isMaxBots ? 'disabled' : ''}>
                         <span class="upgrade-button-text">Purchase Bot</span>
-                        <span class="upgrade-button-cost">${formatNumber(botCost, 2)} Messages</span>
+                        <span class="upgrade-button-cost">${isMaxBots ? 'Max Level' : `${formatNumber(botCost, 2)} Messages`}</span>
                     </button>
                 </div>
                 
                 <div class="upgrade-item">
                     <div class="upgrade-header">
                         <h3 class="upgrade-title">Bot Efficiency</h3>
+                        <div class="upgrade-level">Level ${efficiencyLevel}</div>
                     </div>
                     <p class="upgrade-description">Increase the efficiency of all your bots by 10% per upgrade (compounding).</p>
                     <div class="upgrade-stats">
@@ -1018,9 +1197,9 @@ function loadChannel(channelId) {
                             <span class="stat-value">${formatNumber((gen.efficiency || 1.0) * 100, 0)}%</span>
                         </div>
                     </div>
-                    <button class="upgrade-button ${canAffordEfficiency ? '' : 'disabled'}" id="upgrade-efficiency" ${!canAffordEfficiency ? 'disabled' : ''}>
+                    <button class="upgrade-button ${canAffordEfficiency && !isMaxEfficiency ? '' : 'disabled'}" id="upgrade-efficiency" ${!canAffordEfficiency || isMaxEfficiency ? 'disabled' : ''}>
                         <span class="upgrade-button-text">Upgrade Efficiency</span>
-                        <span class="upgrade-button-cost">${formatNumber(efficiencyCost, 2)} Messages</span>
+                        <span class="upgrade-button-cost">${isMaxEfficiency ? 'Max Level' : `${formatNumber(efficiencyCost, 2)} Messages`}</span>
                     </button>
                 </div>
                 
@@ -1036,9 +1215,9 @@ function loadChannel(channelId) {
                             <span class="stat-value">${formatNumber(1.0 * Math.pow(1.1, gen.botSpeed || 0), 2)} msg/s per bot</span>
                         </div>
                     </div>
-                    <button class="upgrade-button ${canAffordBotSpeed ? '' : 'disabled'}" id="upgrade-bot-speed" ${!canAffordBotSpeed ? 'disabled' : ''}>
+                    <button class="upgrade-button ${canAffordBotSpeed && !isMaxBotSpeed ? '' : 'disabled'}" id="upgrade-bot-speed" ${!canAffordBotSpeed || isMaxBotSpeed ? 'disabled' : ''}>
                         <span class="upgrade-button-text">Upgrade Bot Speed</span>
-                        <span class="upgrade-button-cost">${formatNumber(botSpeedCost, 2)} Messages</span>
+                        <span class="upgrade-button-cost">${isMaxBotSpeed ? 'Max Level' : `${formatNumber(botSpeedCost, 2)} Messages`}</span>
                     </button>
                 </div>
                 
@@ -1136,22 +1315,26 @@ function loadChannel(channelId) {
     } else if (channelId === 'global1' && currentServer === 'upgrades') {
         // Global upgrades channel 1
         const multiplierLevel = gameState.upgrades.manualGenerationMultiplier || 0;
+        const isMaxManualMultiplier = multiplierLevel >= GLOBAL_UPGRADE_MAX_LEVELS.manualGenerationMultiplier;
         const currentMultiplier = getManualGenerationMultiplier();
-        const upgradeCost = Math.floor(getManualGenerationUpgradeCost(multiplierLevel) * getCostReductionMultiplier());
+        const upgradeCost = isMaxManualMultiplier ? 0 : Math.floor(getManualGenerationUpgradeCost(multiplierLevel) * getCostReductionMultiplier());
         const totalMessages = gameState.messages + (gameState.fractionalMessages || 0);
-        const canAfford = totalMessages >= upgradeCost;
+        const canAfford = !isMaxManualMultiplier && totalMessages >= upgradeCost;
         
         const autoBoostLevel = gameState.upgrades.autoGenerationBoost || 0;
-        const autoBoostCost = Math.floor(getAutoGenerationBoostCost(autoBoostLevel) * getCostReductionMultiplier());
-        const canAffordAutoBoost = totalMessages >= autoBoostCost;
+        const isMaxAutoBoost = autoBoostLevel >= GLOBAL_UPGRADE_MAX_LEVELS.autoGenerationBoost;
+        const autoBoostCost = isMaxAutoBoost ? 0 : Math.floor(getAutoGenerationBoostCost(autoBoostLevel) * getCostReductionMultiplier());
+        const canAffordAutoBoost = !isMaxAutoBoost && totalMessages >= autoBoostCost;
         
         const messageMultiplierLevel = gameState.upgrades.messageMultiplier || 0;
-        const messageMultiplierCost = Math.floor(getMessageMultiplierCost(messageMultiplierLevel) * getCostReductionMultiplier());
-        const canAffordMessageMultiplier = totalMessages >= messageMultiplierCost;
+        const isMaxMessageMultiplier = messageMultiplierLevel >= GLOBAL_UPGRADE_MAX_LEVELS.messageMultiplier;
+        const messageMultiplierCost = isMaxMessageMultiplier ? 0 : Math.floor(getMessageMultiplierCost(messageMultiplierLevel) * getCostReductionMultiplier());
+        const canAffordMessageMultiplier = !isMaxMessageMultiplier && totalMessages >= messageMultiplierCost;
         
         const costEfficiencyLevel = gameState.upgrades.costEfficiency || 0;
-        const costEfficiencyCost = Math.floor(getCostEfficiencyCost(costEfficiencyLevel) * getCostReductionMultiplier());
-        const canAffordCostEfficiency = totalMessages >= costEfficiencyCost;
+        const isMaxCostEfficiency = costEfficiencyLevel >= GLOBAL_UPGRADE_MAX_LEVELS.costEfficiency;
+        const costEfficiencyCost = isMaxCostEfficiency ? 0 : Math.floor(getCostEfficiencyCost(costEfficiencyLevel) * getCostReductionMultiplier());
+        const canAffordCostEfficiency = !isMaxCostEfficiency && totalMessages >= costEfficiencyCost;
         const costReduction = Math.min(costEfficiencyLevel * 5, 50);
         
         contentBody.innerHTML = `
@@ -1165,11 +1348,11 @@ function loadChannel(channelId) {
                     <div class="upgrade-stats">
                         <div class="upgrade-stat">
                             <span class="stat-label">Current Multiplier:</span>
-                            <span class="stat-value">${formatNumber(currentMultiplier * 100, 0)}%</span>
+                            <span class="stat-value">+${formatNumber((currentMultiplier - 1) * 100, 0)}%</span>
                         </div>
                         <div class="upgrade-stat">
                             <span class="stat-label">Average Messages Per Click:</span>
-                            <span class="stat-value">${formatNumber(getMessagesPerClick(), 1)}</span>
+                            <span class="stat-value">${formatNumber(getMessagesPerClick() * getGlobalMessageMultiplier(), 1)}</span>
                         </div>
                     </div>
                     <button class="upgrade-button ${canAfford ? '' : 'disabled'}" id="buy-manual-multiplier" ${!canAfford ? 'disabled' : ''}>
@@ -1190,9 +1373,9 @@ function loadChannel(channelId) {
                             <span class="stat-value">+${formatNumber(autoBoostLevel * 10, 0)}%</span>
                         </div>
                     </div>
-                    <button class="upgrade-button ${canAffordAutoBoost ? '' : 'disabled'}" id="buy-auto-boost" ${!canAffordAutoBoost ? 'disabled' : ''}>
+                    <button class="upgrade-button ${canAffordAutoBoost && !isMaxAutoBoost ? '' : 'disabled'}" id="buy-auto-boost" ${!canAffordAutoBoost || isMaxAutoBoost ? 'disabled' : ''}>
                         <span class="upgrade-button-text">Purchase Upgrade</span>
-                        <span class="upgrade-button-cost">${formatNumber(autoBoostCost, 2)} Messages</span>
+                        <span class="upgrade-button-cost">${isMaxAutoBoost ? 'Max Level' : `${formatNumber(autoBoostCost, 2)} Messages`}</span>
                     </button>
                 </div>
                 
@@ -1208,9 +1391,9 @@ function loadChannel(channelId) {
                             <span class="stat-value">+${formatNumber(messageMultiplierLevel * 5, 0)}%</span>
                         </div>
                     </div>
-                    <button class="upgrade-button ${canAffordMessageMultiplier ? '' : 'disabled'}" id="buy-message-multiplier" ${!canAffordMessageMultiplier ? 'disabled' : ''}>
+                    <button class="upgrade-button ${canAffordMessageMultiplier && !isMaxMessageMultiplier ? '' : 'disabled'}" id="buy-message-multiplier" ${!canAffordMessageMultiplier || isMaxMessageMultiplier ? 'disabled' : ''}>
                         <span class="upgrade-button-text">Purchase Upgrade</span>
-                        <span class="upgrade-button-cost">${formatNumber(messageMultiplierCost, 2)} Messages</span>
+                        <span class="upgrade-button-cost">${isMaxMessageMultiplier ? 'Max Level' : `${formatNumber(messageMultiplierCost, 2)} Messages`}</span>
                     </button>
                 </div>
                 
@@ -1226,9 +1409,9 @@ function loadChannel(channelId) {
                             <span class="stat-value">-${formatNumber(costReduction, 0)}%</span>
                         </div>
                     </div>
-                    <button class="upgrade-button ${canAffordCostEfficiency ? '' : 'disabled'}" id="buy-cost-efficiency" ${!canAffordCostEfficiency ? 'disabled' : ''}>
+                    <button class="upgrade-button ${canAffordCostEfficiency && !isMaxCostEfficiency ? '' : 'disabled'}" id="buy-cost-efficiency" ${!canAffordCostEfficiency || isMaxCostEfficiency ? 'disabled' : ''}>
                         <span class="upgrade-button-text">Purchase Upgrade</span>
-                        <span class="upgrade-button-cost">${formatNumber(costEfficiencyCost, 2)} Messages</span>
+                        <span class="upgrade-button-cost">${isMaxCostEfficiency ? 'Max Level' : `${formatNumber(costEfficiencyCost, 2)} Messages`}</span>
                     </button>
                 </div>
             </div>
@@ -1290,11 +1473,43 @@ function loadChannel(channelId) {
                 </div>
                 
                 <div class="settings-section">
+                    <h3 class="settings-title">UI Colors</h3>
+                    <p class="settings-description">Customize the appearance of the game.</p>
+                    <div class="color-controls">
+                        <div class="color-control">
+                            <label class="color-label">Background Color:</label>
+                            <div class="color-input-wrapper">
+                                <input type="color" id="bg-color-picker" value="${gameState.settings.backgroundColor || '#36393f'}" class="color-picker">
+                                <input type="text" id="bg-color-text" value="${gameState.settings.backgroundColor || '#36393f'}" class="color-text" maxlength="7">
+                            </div>
+                        </div>
+                        <div class="color-control">
+                            <label class="color-label">Accent Color:</label>
+                            <div class="color-input-wrapper">
+                                <input type="color" id="accent-color-picker" value="${gameState.settings.accentColor || '#5865f2'}" class="color-picker">
+                                <input type="text" id="accent-color-text" value="${gameState.settings.accentColor || '#5865f2'}" class="color-text" maxlength="7">
+                            </div>
+                        </div>
+                        <div class="color-presets">
+                            <label class="color-label">Presets:</label>
+                            <div class="preset-buttons">
+                                <button class="preset-button" data-preset="default">Default</button>
+                                <button class="preset-button" data-preset="green">Green</button>
+                                <button class="preset-button" data-preset="purple">Purple</button>
+                                <button class="preset-button" data-preset="red">Red</button>
+                                <button class="preset-button" data-preset="orange">Orange</button>
+                                <button class="preset-button" data-preset="pink">Pink</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="settings-section">
                     <h3 class="settings-title">Game Data</h3>
                     <p class="settings-description">Manage your save data.</p>
                     <div class="settings-buttons">
-                        <button class="settings-button" id="export-save">Export Save</button>
-                        <button class="settings-button" id="import-save">Import Save</button>
+                        <button class="settings-button save-button" id="export-save">Export Save</button>
+                        <button class="settings-button save-button" id="import-save">Import Save</button>
                         <button class="settings-button danger" id="reset-game">Reset Game</button>
                     </div>
                 </div>
@@ -1357,7 +1572,7 @@ function loadChannel(channelId) {
                         </div>
                         <div class="stat-item">
                             <span class="stat-label">Production Rate:</span>
-                            <span class="stat-value">${formatNumber(production, 2)} msg/s</span>
+                            <span class="stat-value">${formatNumber(production * getGlobalMessageMultiplier(), 2)} msg/s</span>
                         </div>
                     </div>
                 </div>
@@ -1590,10 +1805,28 @@ function showUnlockPrompt(generatorId) {
     }
 }
 
+// Max levels for Generator 1
+const GENERATOR1_MAX_LEVELS = {
+    bots: 50,
+    efficiency: 10,
+    botSpeed: 10,
+    autoBuyDelay: 10
+};
+
+// Max levels for Global Upgrades
+const GLOBAL_UPGRADE_MAX_LEVELS = {
+    manualGenerationMultiplier: 25,
+    autoGenerationBoost: 10,
+    messageMultiplier: 10,
+    costEfficiency: 10
+};
+
 // Get bot cost (increases with each bot)
 function getBotCost(currentBots) {
-    // Fixed cost per bot (doesn't increase)
-    return 1000;
+    // Slow scaling: 1.05x per bot
+    // Base cost 1000, so bot #0 = 1000, bot #1 = 1050, bot #2 = 1102.5, etc.
+    // Note: The free bot from unlocking doesn't count for cost scaling
+    return Math.floor(1000 * Math.pow(1.05, currentBots));
 }
 
 // Get efficiency upgrade cost
@@ -1620,6 +1853,10 @@ function getAutoBuyDelay(level) {
 
 // Get max auto-buy delay level (when delay reaches 0.1s)
 function getMaxAutoBuyDelayLevel() {
+    // For Generator 1, use the max level from GENERATOR1_MAX_LEVELS
+    if (currentServer === 'generator1') {
+        return GENERATOR1_MAX_LEVELS.autoBuyDelay;
+    }
     // Calculate level where delay reaches 0.1s
     // 5 * (0.85 ^ level) = 0.1
     // 0.85 ^ level = 0.02
@@ -1659,7 +1896,16 @@ function purchaseBot(generatorId) {
     const gen = gameState.generators[generatorId];
     if (!gen) return;
     
-    const cost = Math.floor(getBotCost(gen.bots || 0) * getCostReductionMultiplier());
+    // Check max bot limit
+    const currentBots = gen.bots || 0;
+    if (generatorId === 'generator1' && currentBots >= GENERATOR1_MAX_LEVELS.bots) {
+        return; // Already at max
+    }
+    
+    // Calculate cost: if they have 1 bot (the free one), next bot costs 1000 (bot #0 cost)
+    // Otherwise, use the normal cost scaling
+    const costBots = currentBots === 1 ? 0 : currentBots;
+    const cost = Math.floor(getBotCost(costBots) * getCostReductionMultiplier());
     const totalMessages = gameState.messages + (gameState.fractionalMessages || 0);
     
     if (totalMessages >= cost) {
@@ -1672,7 +1918,7 @@ function purchaseBot(generatorId) {
             gameState.messages -= remaining;
         }
         
-        gen.bots = (gen.bots || 0) + 1;
+        gen.bots = currentBots + 1;
         autoSave();
         updateCurrencyDisplay();
         
@@ -1693,6 +1939,16 @@ function upgradeBotEfficiency(generatorId) {
     
     const gen = gameState.generators[generatorId];
     if (!gen) return;
+    
+    // Check max level limit for Generator 1
+    if (generatorId === 'generator1') {
+        const currentEfficiency = gen.efficiency || 1.0;
+        // Calculate level from efficiency: efficiency = 1.0 * (1.1 ^ level)
+        const currentLevel = Math.floor(Math.log(currentEfficiency / 1.0) / Math.log(1.1));
+        if (currentLevel >= GENERATOR1_MAX_LEVELS.efficiency) {
+            return; // Already at max
+        }
+    }
     
     const cost = Math.floor(getEfficiencyUpgradeCost(gen.efficiency || 1.0) * getCostReductionMultiplier());
     const totalMessages = gameState.messages + (gameState.fractionalMessages || 0);
@@ -2054,6 +2310,134 @@ function showPopup(container, text) {
 }
 
 // Setup settings handlers
+// Color preset definitions
+const COLOR_PRESETS = {
+    default: { bg: '#36393f', accent: '#5865f2' },
+    green: { bg: '#2d3a2d', accent: '#57f287' },
+    purple: { bg: '#3d2d3d', accent: '#eb459e' },
+    red: { bg: '#3d2d2d', accent: '#ed4245' },
+    orange: { bg: '#3d332d', accent: '#faa61a' },
+    pink: { bg: '#3d2d35', accent: '#ff73fa' }
+};
+
+// Convert hex to RGB
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
+
+// Convert RGB to hex
+function rgbToHex(r, g, b) {
+    return "#" + [r, g, b].map(x => {
+        const hex = x.toString(16);
+        return hex.length === 1 ? "0" + hex : hex;
+    }).join("");
+}
+
+// Calculate luminance (brightness) of a color
+function getLuminance(hex) {
+    const rgb = hexToRgb(hex);
+    if (!rgb) return 0.5;
+    // Relative luminance formula
+    const r = rgb.r / 255;
+    const g = rgb.g / 255;
+    const b = rgb.b / 255;
+    const [rs, gs, bs] = [r, g, b].map(val => {
+        return val <= 0.03928 ? val / 12.92 : Math.pow((val + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * rs + 0.7152 * gs + 0.0722 * bs;
+}
+
+// Darken a color by a percentage
+function darkenColor(hex, percent) {
+    const rgb = hexToRgb(hex);
+    if (!rgb) return hex;
+    const factor = 1 - (percent / 100);
+    return rgbToHex(
+        Math.max(0, Math.floor(rgb.r * factor)),
+        Math.max(0, Math.floor(rgb.g * factor)),
+        Math.max(0, Math.floor(rgb.b * factor))
+    );
+}
+
+// Lighten a color by a percentage
+function lightenColor(hex, percent) {
+    const rgb = hexToRgb(hex);
+    if (!rgb) return hex;
+    const factor = 1 + (percent / 100);
+    return rgbToHex(
+        Math.min(255, Math.floor(rgb.r * factor)),
+        Math.min(255, Math.floor(rgb.g * factor)),
+        Math.min(255, Math.floor(rgb.b * factor))
+    );
+}
+
+// Apply colors to CSS variables
+function applyColors() {
+    const bgColor = gameState.settings.backgroundColor || '#36393f';
+    const accentColor = gameState.settings.accentColor || '#5865f2';
+    
+    const root = document.documentElement;
+    root.style.setProperty('--bg-color', bgColor);
+    root.style.setProperty('--accent-color', accentColor);
+    
+    // Calculate darker/lighter tones from background
+    root.style.setProperty('--bg-darker', darkenColor(bgColor, 30));
+    root.style.setProperty('--bg-dark', darkenColor(bgColor, 15));
+    root.style.setProperty('--bg-medium', darkenColor(bgColor, 20));
+    root.style.setProperty('--bg-light', lightenColor(bgColor, 8));
+    root.style.setProperty('--bg-lighter', lightenColor(bgColor, 12));
+    
+    // Adjust text color based on background brightness
+    const bgLuminance = getLuminance(bgColor);
+    // Use a lower threshold (0.4) to switch to dark text earlier for better contrast
+    if (bgLuminance > 0.4) {
+        // Light background - use dark text
+        root.style.setProperty('--text-color', '#2c2f33');
+        root.style.setProperty('--text-secondary', '#4f545c');
+        root.style.setProperty('--text-muted', '#747f8d');
+        root.style.setProperty('--text-bright', '#060607');
+        root.style.setProperty('--upgrade-level-text', '#000000'); // Black on light backgrounds
+        // For upgrade level badge on light backgrounds - use darker accent with more opacity
+        const accentRgb = hexToRgb(accentColor);
+        if (accentRgb) {
+            const darkerAccent = {
+                r: Math.max(0, accentRgb.r - 40),
+                g: Math.max(0, accentRgb.g - 40),
+                b: Math.max(0, accentRgb.b - 40)
+            };
+            // Convert to rgba for opacity
+            root.style.setProperty('--accent-badge-bg', `rgba(${darkerAccent.r}, ${darkerAccent.g}, ${darkerAccent.b}, 0.2)`);
+        } else {
+            root.style.setProperty('--accent-badge-bg', 'rgba(0, 0, 0, 0.2)');
+        }
+    } else {
+        // Dark background - use light text
+        root.style.setProperty('--text-color', '#dcddde');
+        root.style.setProperty('--text-secondary', '#b9bbbe');
+        root.style.setProperty('--text-muted', '#8e9297');
+        root.style.setProperty('--text-bright', '#ffffff');
+        root.style.setProperty('--upgrade-level-text', '#ffffff'); // White on dark backgrounds
+        // For upgrade level badge on dark backgrounds - use lighter accent with less opacity
+        const accentRgb = hexToRgb(accentColor);
+        if (accentRgb) {
+            const lighterAccent = {
+                r: Math.min(255, accentRgb.r + 30),
+                g: Math.min(255, accentRgb.g + 30),
+                b: Math.min(255, accentRgb.b + 30)
+            };
+            // Convert to rgba for opacity - only background, not text
+            root.style.setProperty('--accent-badge-bg', `rgba(${lighterAccent.r}, ${lighterAccent.g}, ${lighterAccent.b}, 0.15)`);
+        } else {
+            root.style.setProperty('--accent-badge-bg', 'rgba(255, 255, 255, 0.15)');
+        }
+    }
+}
+
 function setupSettingsHandlers() {
     // Number format radio buttons
     const formatRadios = document.querySelectorAll('input[name="numberFormat"]');
@@ -2062,12 +2446,85 @@ function setupSettingsHandlers() {
             if (e.target.checked) {
                 gameState.settings.numberFormat = e.target.value;
                 saveSettings();
+                autoSave(); // Save full game state immediately
                 updateCurrencyDisplay();
                 // Update preview
                 const preview = document.getElementById('format-preview');
                 if (preview) {
                     preview.textContent = formatNumber(1567668);
                 }
+            }
+        });
+    });
+    
+    // Color pickers
+    const bgColorPicker = document.getElementById('bg-color-picker');
+    const bgColorText = document.getElementById('bg-color-text');
+    const accentColorPicker = document.getElementById('accent-color-picker');
+    const accentColorText = document.getElementById('accent-color-text');
+    
+    if (bgColorPicker && bgColorText) {
+        bgColorPicker.addEventListener('input', (e) => {
+            const color = e.target.value;
+            bgColorText.value = color;
+            gameState.settings.backgroundColor = color;
+            applyColors();
+            saveSettings();
+            autoSave(); // Save full game state immediately
+        });
+        
+        bgColorText.addEventListener('input', (e) => {
+            const color = e.target.value;
+            if (/^#[0-9A-Fa-f]{6}$/.test(color)) {
+                bgColorPicker.value = color;
+                gameState.settings.backgroundColor = color;
+                applyColors();
+                saveSettings();
+                autoSave(); // Save full game state immediately
+            }
+        });
+    }
+    
+    if (accentColorPicker && accentColorText) {
+        accentColorPicker.addEventListener('input', (e) => {
+            const color = e.target.value;
+            accentColorText.value = color;
+            gameState.settings.accentColor = color;
+            applyColors();
+            saveSettings();
+            autoSave(); // Save full game state immediately
+        });
+        
+        accentColorText.addEventListener('input', (e) => {
+            const color = e.target.value;
+            if (/^#[0-9A-Fa-f]{6}$/.test(color)) {
+                accentColorPicker.value = color;
+                gameState.settings.accentColor = color;
+                applyColors();
+                saveSettings();
+                autoSave(); // Save full game state immediately
+            }
+        });
+    }
+    
+    // Preset buttons
+    const presetButtons = document.querySelectorAll('.preset-button');
+    presetButtons.forEach(button => {
+        button.addEventListener('click', (e) => {
+            const preset = e.target.dataset.preset;
+            if (COLOR_PRESETS[preset]) {
+                const colors = COLOR_PRESETS[preset];
+                gameState.settings.backgroundColor = colors.bg;
+                gameState.settings.accentColor = colors.accent;
+                
+                if (bgColorPicker) bgColorPicker.value = colors.bg;
+                if (bgColorText) bgColorText.value = colors.bg;
+                if (accentColorPicker) accentColorPicker.value = colors.accent;
+                if (accentColorText) accentColorText.value = colors.accent;
+                
+                applyColors();
+                saveSettings();
+                autoSave(); // Save full game state immediately
             }
         });
     });
@@ -2210,6 +2667,12 @@ function getManualGenerationUpgradeCost(level) {
 // Purchase manual generation upgrade
 function purchaseManualGenerationUpgrade() {
     const currentLevel = gameState.upgrades.manualGenerationMultiplier || 0;
+    
+    // Check max level limit
+    if (currentLevel >= GLOBAL_UPGRADE_MAX_LEVELS.manualGenerationMultiplier) {
+        return; // Already at max
+    }
+    
     const cost = Math.floor(getManualGenerationUpgradeCost(currentLevel) * getCostReductionMultiplier());
     const totalMessages = gameState.messages + (gameState.fractionalMessages || 0);
     
@@ -2223,7 +2686,7 @@ function purchaseManualGenerationUpgrade() {
             gameState.messages -= remaining;
         }
         
-        gameState.upgrades.manualGenerationMultiplier = (gameState.upgrades.manualGenerationMultiplier || 0) + 1;
+        gameState.upgrades.manualGenerationMultiplier = currentLevel + 1;
         autoSave();
         updateCurrencyDisplay();
         
@@ -2235,6 +2698,12 @@ function purchaseManualGenerationUpgrade() {
 // Purchase auto-generation boost
 function purchaseAutoGenerationBoost() {
     const currentLevel = gameState.upgrades.autoGenerationBoost || 0;
+    
+    // Check max level limit
+    if (currentLevel >= GLOBAL_UPGRADE_MAX_LEVELS.autoGenerationBoost) {
+        return; // Already at max
+    }
+    
     const cost = Math.floor(getAutoGenerationBoostCost(currentLevel) * getCostReductionMultiplier());
     const totalMessages = gameState.messages + (gameState.fractionalMessages || 0);
     
@@ -2248,7 +2717,7 @@ function purchaseAutoGenerationBoost() {
             gameState.messages -= remaining;
         }
         
-        gameState.upgrades.autoGenerationBoost = (gameState.upgrades.autoGenerationBoost || 0) + 1;
+        gameState.upgrades.autoGenerationBoost = currentLevel + 1;
         autoSave();
         updateCurrencyDisplay();
         loadChannel(currentChannel);
@@ -2258,6 +2727,12 @@ function purchaseAutoGenerationBoost() {
 // Purchase message multiplier
 function purchaseMessageMultiplier() {
     const currentLevel = gameState.upgrades.messageMultiplier || 0;
+    
+    // Check max level limit
+    if (currentLevel >= GLOBAL_UPGRADE_MAX_LEVELS.messageMultiplier) {
+        return; // Already at max
+    }
+    
     const cost = Math.floor(getMessageMultiplierCost(currentLevel) * getCostReductionMultiplier());
     const totalMessages = gameState.messages + (gameState.fractionalMessages || 0);
     
@@ -2271,7 +2746,7 @@ function purchaseMessageMultiplier() {
             gameState.messages -= remaining;
         }
         
-        gameState.upgrades.messageMultiplier = (gameState.upgrades.messageMultiplier || 0) + 1;
+        gameState.upgrades.messageMultiplier = currentLevel + 1;
         autoSave();
         updateCurrencyDisplay();
         loadChannel(currentChannel);
@@ -2281,6 +2756,12 @@ function purchaseMessageMultiplier() {
 // Purchase cost efficiency
 function purchaseCostEfficiency() {
     const currentLevel = gameState.upgrades.costEfficiency || 0;
+    
+    // Check max level limit
+    if (currentLevel >= GLOBAL_UPGRADE_MAX_LEVELS.costEfficiency) {
+        return; // Already at max
+    }
+    
     const cost = Math.floor(getCostEfficiencyCost(currentLevel) * getCostReductionMultiplier());
     const totalMessages = gameState.messages + (gameState.fractionalMessages || 0);
     
@@ -2294,7 +2775,7 @@ function purchaseCostEfficiency() {
             gameState.messages -= remaining;
         }
         
-        gameState.upgrades.costEfficiency = (gameState.upgrades.costEfficiency || 0) + 1;
+        gameState.upgrades.costEfficiency = currentLevel + 1;
         autoSave();
         updateCurrencyDisplay();
         loadChannel(currentChannel);
@@ -2309,6 +2790,12 @@ function upgradeBotSpeed(generatorId) {
     if (!gen) return;
     
     const currentLevel = gen.botSpeed || 0;
+    
+    // Check max level limit for Generator 1
+    if (generatorId === 'generator1' && currentLevel >= GENERATOR1_MAX_LEVELS.botSpeed) {
+        return; // Already at max
+    }
+    
     const cost = Math.floor(getBotSpeedCost(currentLevel) * getCostReductionMultiplier());
     const totalMessages = gameState.messages + (gameState.fractionalMessages || 0);
     
@@ -2322,7 +2809,7 @@ function upgradeBotSpeed(generatorId) {
             gameState.messages -= remaining;
         }
         
-        gen.botSpeed = (gen.botSpeed || 0) + 1;
+        gen.botSpeed = currentLevel + 1;
         autoSave();
         updateCurrencyDisplay();
         
@@ -2401,6 +2888,12 @@ function upgradeAutoBuyDelay(generatorId) {
     if (!gen) return;
     
     const currentLevel = gen.autoBuyDelayLevel || 0;
+    
+    // Check max level limit for Generator 1
+    if (generatorId === 'generator1' && currentLevel >= GENERATOR1_MAX_LEVELS.autoBuyDelay) {
+        return; // Already at max
+    }
+    
     const maxLevel = getMaxAutoBuyDelayLevel();
     
     // Don't allow upgrade if at max level
