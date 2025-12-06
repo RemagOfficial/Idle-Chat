@@ -100,30 +100,24 @@ const servers = {
     },
     generator2: {
         name: 'Generator 2',
-        channels: {
-            upgrade1: { name: 'upgrade-1', content: 'Generator 2 upgrades' },
-            upgrade2: { name: 'upgrade-2', content: 'More Generator 2 upgrades' }
-        }
+        locked: true,
+        channels: {}
     },
     generator3: {
         name: 'Generator 3',
-        channels: {
-            upgrade1: { name: 'upgrade-1', content: 'Generator 3 upgrades' },
-            upgrade2: { name: 'upgrade-2', content: 'More Generator 3 upgrades' }
-        }
+        locked: true,
+        channels: {}
     },
     upgrades: {
         name: 'Global Upgrades',
         channels: {
-            global1: { name: 'global-upgrade-1', content: 'Global upgrade options' },
-            global2: { name: 'global-upgrade-2', content: 'More global upgrades' }
+            global1: { name: 'global-upgrade-1', content: 'Global upgrade options' }
         }
     },
     settings: {
         name: 'Settings',
         channels: {
             general: { name: 'general', content: 'General game settings' },
-            audio: { name: 'audio', content: 'Audio settings' },
             about: { name: 'about', content: 'About the game' }
         }
     }
@@ -1352,7 +1346,7 @@ function loadChannel(channelId) {
                         </div>
                         <div class="upgrade-stat">
                             <span class="stat-label">Average Messages Per Click:</span>
-                            <span class="stat-value">${formatNumber(getMessagesPerClick() * getGlobalMessageMultiplier(), 1)}</span>
+                            <span class="stat-value">${formatNumber(getManualGenerationMultiplier() * getGlobalMessageMultiplier(), 1)}</span>
                         </div>
                     </div>
                     <button class="upgrade-button ${canAfford ? '' : 'disabled'}" id="buy-manual-multiplier" ${!canAfford ? 'disabled' : ''}>
@@ -1657,7 +1651,6 @@ function loadChannel(channelId) {
             <div class="welcome-message">
                 <h2>${channel.name}</h2>
                 <p>${channel.content}</p>
-                <p style="margin-top: 20px; color: #8e9297;">This is a placeholder. Game content will be added here.</p>
             </div>
         `;
     }
@@ -1854,15 +1847,7 @@ function getAutoBuyDelay(level) {
 // Get max auto-buy delay level (when delay reaches 0.1s)
 function getMaxAutoBuyDelayLevel() {
     // For Generator 1, use the max level from GENERATOR1_MAX_LEVELS
-    if (currentServer === 'generator1') {
-        return GENERATOR1_MAX_LEVELS.autoBuyDelay;
-    }
-    // Calculate level where delay reaches 0.1s
-    // 5 * (0.85 ^ level) = 0.1
-    // 0.85 ^ level = 0.02
-    // level * log(0.85) = log(0.02)
-    // level = log(0.02) / log(0.85) ≈ 20.6
-    return 21; // Round up to be safe
+    return GENERATOR1_MAX_LEVELS.autoBuyDelay;
 }
 
 // Get auto-buy delay upgrade cost
@@ -1984,11 +1969,6 @@ function getManualGenerationMultiplier() {
     const level = gameState.upgrades.manualGenerationMultiplier || 0;
     // Each level multiplies by 1.1 (compounding: 1.0, 1.1, 1.21, 1.331, ...)
     return Math.pow(1.1, level);
-}
-
-// Get messages generated per click (average)
-function getMessagesPerClick() {
-    return getManualGenerationMultiplier();
 }
 
 // Random usernames and avatars for fake messages
