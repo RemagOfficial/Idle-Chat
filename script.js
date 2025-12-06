@@ -118,6 +118,7 @@ const servers = {
         name: 'Settings',
         channels: {
             general: { name: 'general', content: 'General game settings' },
+            changelog: { name: 'changelog', content: 'Game changelog and updates' },
             about: { name: 'about', content: 'About the game' }
         }
     }
@@ -202,11 +203,7 @@ function createServerIcon(serverId, label, isHome, isLocked = false) {
     icon.dataset.server = serverId;
     
     if (isHome) {
-        icon.innerHTML = `
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 2L2 7v10c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-10-5z"/>
-            </svg>
-        `;
+        icon.innerHTML = `<img src="assets/logo.png" alt="Home" class="home-logo" />`;
     } else if (serverId === 'settings') {
         icon.innerHTML = `
             <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
@@ -1510,6 +1507,19 @@ function loadChannel(channelId) {
             </div>
         `;
         setupSettingsHandlers();
+    } else if (channelId === 'changelog' && currentServer === 'settings') {
+        contentBody.innerHTML = `
+            <div class="settings-content">
+                <div class="settings-section">
+                    <h3 class="settings-title">Changelog</h3>
+                    <p class="settings-description">View updates and changes made to the game.</p>
+                    <div class="changelog-container" id="changelog-container">
+                        <!-- Changelog entries will be displayed here -->
+                    </div>
+                </div>
+            </div>
+        `;
+        renderChangelog();
     } else if (channelId === 'about' && currentServer === 'settings') {
         contentBody.innerHTML = `
             <div class="settings-content">
@@ -2909,6 +2919,49 @@ function upgradeAutoBuyDelay(generatorId) {
         }
         // Otherwise, just update currency (no UI refresh needed)
     }
+}
+
+// Render changelog
+function renderChangelog() {
+    const container = document.getElementById('changelog-container');
+    if (!container) return;
+    
+    // Helper function to format date as YYYY-MM-DD
+    const formatDate = (date) => {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    };
+    
+    // Changelog data - add entries here in reverse chronological order (newest first)
+    // Use new Date() to get the current date when the entry is created
+    const changelog = [
+        {
+            version: 'beta 1.0.0',
+            date: formatDate(new Date()), // Today's date
+            changes: [
+                'Initial release'
+            ]
+        }
+    ];
+    
+    let html = '';
+    changelog.forEach(entry => {
+        html += `
+            <div class="changelog-entry">
+                <div class="changelog-header">
+                    <h4 class="changelog-version">Version ${entry.version}</h4>
+                    <span class="changelog-date">${entry.date}</span>
+                </div>
+                <ul class="changelog-changes">
+                    ${entry.changes.map(change => `<li>${change}</li>`).join('')}
+                </ul>
+            </div>
+        `;
+    });
+    
+    container.innerHTML = html;
 }
 
 // Initialize on page load
