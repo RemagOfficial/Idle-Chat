@@ -2,7 +2,7 @@
 const GENERATOR_COSTS = {
     generator1: 1000,
     generator2: 10000, // 10x generator1
-    generator3: 10000
+    generator3: 100000 // 10x generator2
 };
 
 // Manual generation tracking
@@ -28,6 +28,12 @@ let gameState = {
         autoGenerationBoost: 0, // Global boost to all generators
         messageMultiplier: 0, // Global multiplier to all message generation
         costEfficiency: 0 // Reduces all upgrade costs
+    },
+    research: {
+        globalBoostPurchased: false, // Center node: +100% production to all sources (costs 10 points)
+        manualProduction: 0, // Manual generation production buff (max 5)
+        botProduction: 0, // Bot (generator1) production buff (max 5)
+        cascadeProduction: 0 // Cascade (generator2) production buff (max 5)
     },
     generators: {
         unlocked: [], // Array of unlocked generator IDs
@@ -114,9 +120,11 @@ const servers = {
         }
     },
     generator3: {
-        name: 'Generator 3',
+        name: 'Research Lab',
         locked: true,
-        channels: {}
+        channels: {
+            research: { name: 'research-tree', content: 'Research upgrades and technology' }
+        }
     },
     upgrades: {
         name: 'Global Upgrades',
@@ -345,6 +353,17 @@ function unlockGenerator(generatorId) {
                     autoBuyDelayLevel: 0,
                     prestigeLevel: 0
                 };
+            } else if (generatorId === 'generator3') {
+                // Initialize research state
+                if (!gameState.research) {
+                    gameState.research = {
+                        globalBoostPurchased: false,
+                        manualProduction: 0,
+                        botProduction: 0,
+                        cascadeProduction: 0
+                    };
+                }
+                gameState.generators[generatorId] = {}; // No generator-specific data needed
             } else {
                 gameState.generators[generatorId] = {
                     bots: 0,
@@ -395,7 +414,10 @@ function getGeneratorProduction(generatorId) {
         // Apply global auto-generation boost (compounding) - only for generator1
         const boostLevel = gameState.upgrades.autoGenerationBoost || 0;
         const boostMultiplier = Math.pow(1.1, boostLevel); // Each level multiplies by 1.1
-        return baseProduction * boostMultiplier;
+        baseProduction = baseProduction * boostMultiplier;
+        
+        // Apply research multiplier
+        return baseProduction * getResearchBotMultiplier();
     } else if (generatorId === 'generator2') {
         // Cascades generate messages based on generator1's production
         // Each cascade generates 10% of generator1's base production per second
@@ -415,7 +437,10 @@ function getGeneratorProduction(generatorId) {
         // Apply global auto-generation boost to cascades too
         const boostLevel = gameState.upgrades.autoGenerationBoost || 0;
         const boostMultiplier = Math.pow(1.1, boostLevel);
-        return baseProduction * boostMultiplier;
+        baseProduction = baseProduction * boostMultiplier;
+        
+        // Apply research multiplier
+        return baseProduction * getResearchCascadeMultiplier();
     }
     
     return baseProduction;
@@ -433,6 +458,152 @@ function getCostReductionMultiplier() {
     const efficiencyLevel = gameState.upgrades.costEfficiency || 0;
     const reduction = Math.min(efficiencyLevel * 0.05, 0.5); // -5% per level, max 50%
     return 1.0 - reduction;
+}
+
+// Get current research points (based on current messages)
+function getResearchPoints() {
+    const totalMessages = gameState.messages + (gameState.fractionalMessages || 0);
+    return totalMessages / 10000; // 1 research point per 10,000 messages
+}
+
+// Get research upgrade cost (aggressive scaling)
+function getResearchUpgradeCost(currentLevel) {
+    // Aggressive scaling: 10, 25, 50, 100, 200
+    const costs = [10, 25, 50, 100, 200];
+    return costs[currentLevel] || 200;
+}
+
+// Get research multiplier for manual generation
+function getResearchManualMultiplier() {
+    if (!gameState.research) return 1.0;
+    const globalBoost = gameState.research.globalBoostPurchased ? 2.0 : 1.0; // +100% = 2.0x
+    const manualLevel = gameState.research.manualProduction || 0;
+    const manualMultiplier = 1.0 + (manualLevel * 0.5); // +50% per level
+    return globalBoost * manualMultiplier;
+}
+
+// Get research multiplier for bot production
+function getResearchBotMultiplier() {
+    if (!gameState.research) return 1.0;
+    const globalBoost = gameState.research.globalBoostPurchased ? 2.0 : 1.0; // +100% = 2.0x
+    const botLevel = gameState.research.botProduction || 0;
+    const botMultiplier = 1.0 + (botLevel * 0.5); // +50% per level
+    return globalBoost * botMultiplier;
+}
+
+// Get research multiplier for cascade production
+function getResearchCascadeMultiplier() {
+    if (!gameState.research) return 1.0;
+    const globalBoost = gameState.research.globalBoostPurchased ? 2.0 : 1.0; // +100% = 2.0x
+    const cascadeLevel = gameState.research.cascadeProduction || 0;
+    const cascadeMultiplier = 1.0 + (cascadeLevel * 0.5); // +50% per level
+    return globalBoost * cascadeMultiplier;
+}
+
+// Purchase global boost research upgrade
+function purchaseGlobalBoost() {
+    if (!isGeneratorUnlocked('generator3')) return;
+    
+    const research = gameState.research || {};
+    if (research.globalBoostPurchased) return; // Already purchased
+    
+    const cost = 10;
+    const researchPoints = getResearchPoints();
+    
+    if (researchPoints >= cost) {
+        // Research points are based on messages, so we need to spend 10 * 10000 = 100,000 messages
+        const messageCost = cost * 10000;
+        const totalMessages = gameState.messages + (gameState.fractionalMessages || 0);
+        
+        if (totalMessages >= messageCost) {
+            // Deduct messages
+            if (gameState.fractionalMessages >= messageCost) {
+                gameState.fractionalMessages -= messageCost;
+            } else {
+                const remaining = messageCost - gameState.fractionalMessages;
+                gameState.fractionalMessages = 0;
+                gameState.messages -= remaining;
+            }
+            
+            // Ensure research object exists
+            if (!gameState.research) {
+                gameState.research = { globalBoostPurchased: false, manualProduction: 0, botProduction: 0, cascadeProduction: 0 };
+            }
+            
+            gameState.research.globalBoostPurchased = true;
+            autoSave();
+            updateCurrencyDisplay();
+            
+            // Refresh UI if on research channel
+            if (currentServer === 'generator3' && currentChannel === 'research') {
+                loadChannel('research');
+            }
+        }
+    }
+}
+
+// Upgrade research production (manual, bot, or cascade)
+function upgradeResearchProduction(type) {
+    if (!isGeneratorUnlocked('generator3')) return;
+    
+    const research = gameState.research || {};
+    
+    // Ensure research object exists
+    if (!gameState.research) {
+        gameState.research = { globalBoostPurchased: false, manualProduction: 0, botProduction: 0, cascadeProduction: 0 };
+    }
+    
+    // Check if global boost is purchased (required for branch upgrades)
+    if (!research.globalBoostPurchased) return;
+    
+    let currentLevel = 0;
+    let propertyName = '';
+    
+    if (type === 'manual') {
+        currentLevel = research.manualProduction || 0;
+        propertyName = 'manualProduction';
+    } else if (type === 'bot') {
+        currentLevel = research.botProduction || 0;
+        propertyName = 'botProduction';
+    } else if (type === 'cascade') {
+        currentLevel = research.cascadeProduction || 0;
+        propertyName = 'cascadeProduction';
+    } else {
+        return; // Invalid type
+    }
+    
+    // Check max level
+    if (currentLevel >= 5) return;
+    
+    const cost = getResearchUpgradeCost(currentLevel);
+    const researchPoints = getResearchPoints();
+    
+    if (researchPoints >= cost) {
+        // Research points are based on messages, so we need to spend cost * 10000 messages
+        const messageCost = cost * 10000;
+        const totalMessages = gameState.messages + (gameState.fractionalMessages || 0);
+        
+        if (totalMessages >= messageCost) {
+            // Deduct messages
+            if (gameState.fractionalMessages >= messageCost) {
+                gameState.fractionalMessages -= messageCost;
+            } else {
+                const remaining = messageCost - gameState.fractionalMessages;
+                gameState.fractionalMessages = 0;
+                gameState.messages -= remaining;
+            }
+            
+            // Upgrade
+            gameState.research[propertyName] = currentLevel + 1;
+            autoSave();
+            updateCurrencyDisplay();
+            
+            // Refresh UI if on research channel
+            if (currentServer === 'generator3' && currentChannel === 'research') {
+                loadChannel('research');
+            }
+        }
+    }
 }
 
 // Format playtime
@@ -579,7 +750,8 @@ function init() {
         // Update upgrade button states periodically if on an upgrade channel (every 500ms to avoid too frequent updates)
         const isUpgradeChannel = (currentServer === 'generator1' && currentChannel === 'general') || 
                                  (currentServer === 'generator2' && currentChannel === 'general') ||
-                                 (currentServer === 'upgrades' && currentChannel === 'global1');
+                                 (currentServer === 'upgrades' && currentChannel === 'global1') ||
+                                 (currentServer === 'generator3' && currentChannel === 'research');
         if (isUpgradeChannel) {
             const now = Date.now();
             if (!lastUpgradeUIUpdate || now - lastUpgradeUIUpdate > 500) {
@@ -871,6 +1043,95 @@ function updateUpgradeButtonStates() {
             const costSpan = prestigeBtn.querySelector('.upgrade-button-cost');
             if (costSpan) {
                 costSpan.textContent = allMaxed ? `${formatNumber(prestigeCost, 2)} Messages` : 'Max All Upgrades';
+            }
+        }
+    } else if (currentServer === 'generator3' && currentChannel === 'research') {
+        // Research Tree channel - update research points display and button states
+        const researchPoints = getResearchPoints();
+        const research = gameState.research || { globalBoostPurchased: false, manualProduction: 0, botProduction: 0, cascadeProduction: 0 };
+        
+        // Update research points display
+        const researchPointsHeader = document.querySelector('.research-tree-container h2');
+        if (researchPointsHeader) {
+            researchPointsHeader.textContent = `Research Points: ${formatNumber(researchPoints, 2)}`;
+        }
+        
+        // Center node: Global Boost
+        const globalBoostPurchased = research.globalBoostPurchased || false;
+        const globalBoostCost = 10;
+        const canAffordGlobalBoost = !globalBoostPurchased && researchPoints >= globalBoostCost;
+        
+        // Update global boost button
+        const globalBoostBtn = document.getElementById('purchase-global-boost');
+        if (globalBoostBtn && !globalBoostPurchased) {
+            globalBoostBtn.disabled = !canAffordGlobalBoost;
+            if (!canAffordGlobalBoost) {
+                globalBoostBtn.classList.add('disabled');
+            } else {
+                globalBoostBtn.classList.remove('disabled');
+            }
+        }
+        
+        // Manual Production branch
+        const manualLevel = research.manualProduction || 0;
+        const isMaxManual = manualLevel >= 5;
+        const manualCost = isMaxManual ? 0 : getResearchUpgradeCost(manualLevel);
+        const canAffordManual = !isMaxManual && researchPoints >= manualCost && globalBoostPurchased;
+        
+        // Update manual production button
+        const manualProductionBtn = document.getElementById('upgrade-manual-production');
+        if (manualProductionBtn && !isMaxManual && globalBoostPurchased) {
+            manualProductionBtn.disabled = !canAffordManual;
+            if (!canAffordManual) {
+                manualProductionBtn.classList.add('disabled');
+            } else {
+                manualProductionBtn.classList.remove('disabled');
+            }
+            const costSpan = manualProductionBtn.querySelector('.upgrade-button-cost');
+            if (costSpan) {
+                costSpan.textContent = `${manualCost} Research Points`;
+            }
+        }
+        
+        // Bot Production branch
+        const botLevel = research.botProduction || 0;
+        const isMaxBot = botLevel >= 5;
+        const botCost = isMaxBot ? 0 : getResearchUpgradeCost(botLevel);
+        const canAffordBot = !isMaxBot && researchPoints >= botCost && globalBoostPurchased;
+        
+        // Update bot production button
+        const botProductionBtn = document.getElementById('upgrade-bot-production');
+        if (botProductionBtn && !isMaxBot && globalBoostPurchased) {
+            botProductionBtn.disabled = !canAffordBot;
+            if (!canAffordBot) {
+                botProductionBtn.classList.add('disabled');
+            } else {
+                botProductionBtn.classList.remove('disabled');
+            }
+            const costSpan = botProductionBtn.querySelector('.upgrade-button-cost');
+            if (costSpan) {
+                costSpan.textContent = `${botCost} Research Points`;
+            }
+        }
+        
+        // Cascade Production branch
+        const cascadeLevel = research.cascadeProduction || 0;
+        const isMaxCascade = cascadeLevel >= 5;
+        const cascadeCost = isMaxCascade ? 0 : getResearchUpgradeCost(cascadeLevel);
+        const canAffordCascade = !isMaxCascade && researchPoints >= cascadeCost && globalBoostPurchased;
+        
+        // Update cascade production button
+        const cascadeProductionBtn = document.getElementById('upgrade-cascade-production');
+        if (cascadeProductionBtn && !isMaxCascade && globalBoostPurchased) {
+            cascadeProductionBtn.disabled = !canAffordCascade;
+            if (!canAffordCascade) {
+                cascadeProductionBtn.classList.add('disabled');
+            } else {
+                cascadeProductionBtn.classList.remove('disabled');
+            }
+            const costSpan = cascadeProductionBtn.querySelector('.upgrade-button-cost');
+            if (costSpan) {
+                costSpan.textContent = `${cascadeCost} Research Points`;
             }
         }
     } else if (currentServer === 'upgrades' && currentChannel === 'global1') {
@@ -1988,6 +2249,203 @@ function loadChannel(channelId) {
                 }
             });
         }
+    } else if (currentServer === 'generator3' && channelId === 'research') {
+        // Research Tree channel
+        const researchPoints = getResearchPoints();
+        const research = gameState.research || { globalBoostPurchased: false, manualProduction: 0, botProduction: 0, cascadeProduction: 0 };
+        
+        // Center node: Global Boost
+        const globalBoostPurchased = research.globalBoostPurchased || false;
+        const globalBoostCost = 10;
+        const canAffordGlobalBoost = !globalBoostPurchased && researchPoints >= globalBoostCost;
+        
+        // Manual Production branch
+        const manualLevel = research.manualProduction || 0;
+        const isMaxManual = manualLevel >= 5;
+        const manualCost = isMaxManual ? 0 : getResearchUpgradeCost(manualLevel);
+        const canAffordManual = !isMaxManual && researchPoints >= manualCost;
+        const manualMultiplier = 1.0 + (manualLevel * 0.5); // +50% per level
+        const manualBoost = globalBoostPurchased ? (manualMultiplier * 2.0) : manualMultiplier;
+        
+        // Bot Production branch
+        const botLevel = research.botProduction || 0;
+        const isMaxBot = botLevel >= 5;
+        const botCost = isMaxBot ? 0 : getResearchUpgradeCost(botLevel);
+        const canAffordBot = !isMaxBot && researchPoints >= botCost;
+        const botMultiplier = 1.0 + (botLevel * 0.5); // +50% per level
+        const botBoost = globalBoostPurchased ? (botMultiplier * 2.0) : botMultiplier;
+        
+        // Cascade Production branch
+        const cascadeLevel = research.cascadeProduction || 0;
+        const isMaxCascade = cascadeLevel >= 5;
+        const cascadeCost = isMaxCascade ? 0 : getResearchUpgradeCost(cascadeLevel);
+        const canAffordCascade = !isMaxCascade && researchPoints >= cascadeCost;
+        const cascadeMultiplier = 1.0 + (cascadeLevel * 0.5); // +50% per level
+        const cascadeBoost = globalBoostPurchased ? (cascadeMultiplier * 2.0) : cascadeMultiplier;
+        
+        contentBody.innerHTML = `
+            <div class="research-tree-container">
+                <div style="text-align: center; margin-bottom: 30px;">
+                    <h2 style="margin: 0 0 10px 0;">Research Points: ${formatNumber(researchPoints, 2)}</h2>
+                    <p style="color: var(--text-muted); margin: 0;">1 Research Point = 10,000 Messages</p>
+                </div>
+                
+                <div class="research-tree">
+                    <!-- Center Node: Global Boost -->
+                    <div class="research-node research-node-center ${!globalBoostPurchased && !canAffordGlobalBoost ? 'disabled-node' : ''} ${globalBoostPurchased ? 'purchased-node unlocked' : ''}" id="research-node-global">
+                        <div class="research-node-content upgrade-item">
+                            <div class="upgrade-header">
+                                <h3 class="upgrade-title">⚡ Global Production Boost</h3>
+                                ${globalBoostPurchased ? '<div class="upgrade-level">Purchased</div>' : ''}
+                            </div>
+                            <p class="upgrade-description">Increase production from all sources by 100%. This upgrade affects manual generation, bots, and cascades.</p>
+                            <div class="upgrade-stats">
+                                <div class="upgrade-stat">
+                                    <span class="stat-label">Status:</span>
+                                    <span class="stat-value">${globalBoostPurchased ? 'Active (+100%)' : 'Not Purchased'}</span>
+                                </div>
+                            </div>
+                            ${globalBoostPurchased ? `
+                                <button class="upgrade-button disabled" disabled>
+                                    <span class="upgrade-button-text">Already Purchased</span>
+                                </button>
+                            ` : `
+                                <button class="upgrade-button ${canAffordGlobalBoost ? '' : 'disabled'}" id="purchase-global-boost" ${!canAffordGlobalBoost ? 'disabled' : ''}>
+                                    <span class="upgrade-button-text">Purchase Global Boost</span>
+                                    <span class="upgrade-button-cost">${globalBoostCost} Research Points</span>
+                                </button>
+                            `}
+                        </div>
+                    </div>
+                    
+                    
+                    <!-- Branch Nodes -->
+                    <div class="research-branches ${globalBoostPurchased ? 'unlocked' : ''}">
+                        <!-- Manual Production -->
+                        <div class="research-node research-node-branch ${!globalBoostPurchased ? 'disabled-node' : 'unlocked'}" id="research-node-manual">
+                            <div class="research-node-content upgrade-item">
+                                <div class="upgrade-header">
+                                    <h3 class="upgrade-title">Manual Production</h3>
+                                    <div class="upgrade-level">${isMaxManual ? 'Max Level' : `Level ${manualLevel}/5`}</div>
+                                </div>
+                                <p class="upgrade-description">Increase manual generation production by 50% per level.</p>
+                                <div class="upgrade-stats">
+                                    <div class="upgrade-stat">
+                                        <span class="stat-label">Current Boost:</span>
+                                        <span class="stat-value">+${formatNumber((manualMultiplier - 1.0) * 100, 1)}%</span>
+                                    </div>
+                                </div>
+                                ${!globalBoostPurchased ? `
+                                    <button class="upgrade-button disabled" disabled>
+                                        <span class="upgrade-button-text">Requires Global Boost</span>
+                                    </button>
+                                ` : isMaxManual ? `
+                                    <button class="upgrade-button disabled" disabled>
+                                        <span class="upgrade-button-text">Max Level Reached</span>
+                                    </button>
+                                ` : `
+                                    <button class="upgrade-button ${canAffordManual ? '' : 'disabled'}" id="upgrade-manual-production" ${!canAffordManual ? 'disabled' : ''}>
+                                        <span class="upgrade-button-text">Upgrade Manual Production</span>
+                                        <span class="upgrade-button-cost">${manualCost} Research Points</span>
+                                    </button>
+                                `}
+                            </div>
+                        </div>
+                        
+                        <!-- Bot Production -->
+                        <div class="research-node research-node-branch ${!globalBoostPurchased ? 'disabled-node' : 'unlocked'}" id="research-node-bot">
+                            <div class="research-node-content upgrade-item">
+                                <div class="upgrade-header">
+                                    <h3 class="upgrade-title">Bot Production</h3>
+                                    <div class="upgrade-level">${isMaxBot ? 'Max Level' : `Level ${botLevel}/5`}</div>
+                                </div>
+                                <p class="upgrade-description">Increase bot production by 50% per level.</p>
+                                <div class="upgrade-stats">
+                                    <div class="upgrade-stat">
+                                        <span class="stat-label">Current Boost:</span>
+                                        <span class="stat-value">+${formatNumber((botMultiplier - 1.0) * 100, 1)}%</span>
+                                    </div>
+                                </div>
+                                ${!globalBoostPurchased ? `
+                                    <button class="upgrade-button disabled" disabled>
+                                        <span class="upgrade-button-text">Requires Global Boost</span>
+                                    </button>
+                                ` : isMaxBot ? `
+                                    <button class="upgrade-button disabled" disabled>
+                                        <span class="upgrade-button-text">Max Level Reached</span>
+                                    </button>
+                                ` : `
+                                    <button class="upgrade-button ${canAffordBot ? '' : 'disabled'}" id="upgrade-bot-production" ${!canAffordBot ? 'disabled' : ''}>
+                                        <span class="upgrade-button-text">Upgrade Bot Production</span>
+                                        <span class="upgrade-button-cost">${botCost} Research Points</span>
+                                    </button>
+                                `}
+                            </div>
+                        </div>
+                        
+                        <!-- Cascade Production -->
+                        <div class="research-node research-node-branch ${!globalBoostPurchased ? 'disabled-node' : 'unlocked'}" id="research-node-cascade">
+                            <div class="research-node-content upgrade-item">
+                                <div class="upgrade-header">
+                                    <h3 class="upgrade-title">Cascade Production</h3>
+                                    <div class="upgrade-level">${isMaxCascade ? 'Max Level' : `Level ${cascadeLevel}/5`}</div>
+                                </div>
+                                <p class="upgrade-description">Increase cascade production by 50% per level.</p>
+                                <div class="upgrade-stats">
+                                    <div class="upgrade-stat">
+                                        <span class="stat-label">Current Boost:</span>
+                                        <span class="stat-value">+${formatNumber((cascadeMultiplier - 1.0) * 100, 1)}%</span>
+                                    </div>
+                                </div>
+                                ${!globalBoostPurchased ? `
+                                    <button class="upgrade-button disabled" disabled>
+                                        <span class="upgrade-button-text">Requires Global Boost</span>
+                                    </button>
+                                ` : isMaxCascade ? `
+                                    <button class="upgrade-button disabled" disabled>
+                                        <span class="upgrade-button-text">Max Level Reached</span>
+                                    </button>
+                                ` : `
+                                    <button class="upgrade-button ${canAffordCascade ? '' : 'disabled'}" id="upgrade-cascade-production" ${!canAffordCascade ? 'disabled' : ''}>
+                                        <span class="upgrade-button-text">Upgrade Cascade Production</span>
+                                        <span class="upgrade-button-cost">${cascadeCost} Research Points</span>
+                                    </button>
+                                `}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        // Setup research upgrade handlers
+        const globalBoostBtn = document.getElementById('purchase-global-boost');
+        if (globalBoostBtn) {
+            globalBoostBtn.addEventListener('click', () => {
+                purchaseGlobalBoost();
+            });
+        }
+        
+        const manualProductionBtn = document.getElementById('upgrade-manual-production');
+        if (manualProductionBtn) {
+            manualProductionBtn.addEventListener('click', () => {
+                upgradeResearchProduction('manual');
+            });
+        }
+        
+        const botProductionBtn = document.getElementById('upgrade-bot-production');
+        if (botProductionBtn) {
+            botProductionBtn.addEventListener('click', () => {
+                upgradeResearchProduction('bot');
+            });
+        }
+        
+        const cascadeProductionBtn = document.getElementById('upgrade-cascade-production');
+        if (cascadeProductionBtn) {
+            cascadeProductionBtn.addEventListener('click', () => {
+                upgradeResearchProduction('cascade');
+            });
+        }
     } else if (channelId === 'global1' && currentServer === 'upgrades') {
         // Global upgrades channel 1
         const multiplierLevel = gameState.upgrades.manualGenerationMultiplier || 0;
@@ -2462,6 +2920,15 @@ function loadGameState() {
             // Ensure upgrades exist
             if (!gameState.upgrades) {
                 gameState.upgrades = { manualGenerationMultiplier: 0 };
+            }
+            // Ensure research exists
+            if (!gameState.research) {
+                gameState.research = {
+                    globalBoostPurchased: false,
+                    manualProduction: 0,
+                    botProduction: 0,
+                    cascadeProduction: 0
+                };
             }
             // Ensure fractionalMessages exists
             if (gameState.fractionalMessages === undefined) {
@@ -3220,7 +3687,9 @@ function upgradeBotEfficiency(generatorId) {
 function getManualGenerationMultiplier() {
     const level = gameState.upgrades.manualGenerationMultiplier || 0;
     // Each level multiplies by 1.1 (compounding: 1.0, 1.1, 1.21, 1.331, ...)
-    return Math.pow(1.1, level);
+    const baseMultiplier = Math.pow(1.1, level);
+    // Apply research multiplier
+    return baseMultiplier * getResearchManualMultiplier();
 }
 
 // Random usernames and avatars for fake messages
@@ -4199,6 +4668,22 @@ function renderChangelog() {
     // Changelog data - add entries here in reverse chronological order (newest first)
     // Use new Date() to get the current date when the entry is created
     const changelog = [
+        {
+            version: 'beta 1.0.3',
+            date: formatDate(new Date()), // Today's date
+            changes: [
+                'Added Generator 3: Research Lab (unlocks at 100,000 messages)',
+                'Research Points: 1 point per 10,000 current messages',
+                'Research Tree: Center node (Global Production Boost +100% to all sources for 10 RP) and 3 branches (Manual, Bot, Cascade Production +50% per level, max 5 levels)',
+                'Research upgrades have aggressive scaling costs (10, 25, 50, 100, 200 RP)',
+                'Research multipliers applied to all production calculations',
+                'Implemented visual research tree with nodes and connecting lines',
+                'Fixed research points display to update dynamically without page refresh',
+                'Fixed research upgrade boost display to show only branch upgrade boost (excluding global boost)',
+                'Removed research points from channel header (displayed in channel instead)',
+                'Fixed research tree connection lines positioning'
+            ]
+        },
         {
             version: 'beta 1.0.2',
             date: formatDate(new Date()), // Today's date
