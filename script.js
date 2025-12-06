@@ -2938,6 +2938,13 @@ function renderChangelog() {
     // Use new Date() to get the current date when the entry is created
     const changelog = [
         {
+            version: 'beta 1.0.1',
+            date: formatDate(new Date()), // Today's date
+            changes: [
+                'Added Discord embed support for link sharing'
+            ]
+        },
+        {
             version: 'beta 1.0.0',
             date: formatDate(new Date()), // Today's date
             changes: [
