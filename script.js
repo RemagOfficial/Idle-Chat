@@ -228,6 +228,237 @@ function getNextLockableGenerator() {
     return null;
 }
 
+// Get ping count for a server (number of affordable upgrades, or null if no ping)
+function getServerPingCount(serverId) {
+    const totalMessages = gameState.messages + (gameState.fractionalMessages || 0);
+    
+    // Locked generators: show "!" if they can be unlocked
+    if (serverId === 'generator1' || serverId === 'generator2' || serverId === 'generator3') {
+        if (!isGeneratorUnlocked(serverId)) {
+            const unlockCost = GENERATOR_COSTS[serverId];
+            if (totalMessages >= unlockCost) {
+                return '!'; // Can be unlocked
+            }
+            return null; // Can't unlock yet
+        }
+    }
+    
+    // Unlocked generators: count affordable upgrades
+    if (serverId === 'generator1') {
+        const gen = gameState.generators.generator1 || { bots: 0, efficiency: 1.0, botSpeed: 0, autoBuyPurchased: false, autoBuyDelayLevel: 0 };
+        const maxLevels = getGenerator1MaxLevels();
+        let count = 0;
+        
+        // Check bots (skip if maxed)
+        if (gen.bots < maxLevels.bots) {
+            const costBots = gen.bots === 1 ? 0 : gen.bots;
+            const botCost = Math.floor(getBotCost(costBots) * getCostReductionMultiplier());
+            if (totalMessages >= botCost) count++;
+        }
+        
+        // Check efficiency
+        const currentEfficiency = gen.efficiency || 1.0;
+        const efficiencyLevel = Math.floor(Math.log(currentEfficiency / 1.0) / Math.log(1.1));
+        if (efficiencyLevel < maxLevels.efficiency) {
+            const efficiencyCost = Math.floor(getEfficiencyUpgradeCost(currentEfficiency) * getCostReductionMultiplier());
+            if (totalMessages >= efficiencyCost) count++;
+        }
+        
+        // Check bot speed
+        const botSpeedLevel = gen.botSpeed || 0;
+        if (botSpeedLevel < maxLevels.botSpeed) {
+            const botSpeedCost = Math.floor(getBotSpeedCost(botSpeedLevel) * getCostReductionMultiplier());
+            if (totalMessages >= botSpeedCost) count++;
+        }
+        
+        // Check auto-buy purchase
+        if (!gen.autoBuyPurchased) {
+            const autoBuyCost = 5000;
+            if (totalMessages >= autoBuyCost) count++;
+        }
+        
+        // Check auto-buy delay
+        const autoBuyDelayLevel = gen.autoBuyDelayLevel || 0;
+        const maxDelayLevel = getMaxAutoBuyDelayLevel();
+        if (autoBuyDelayLevel < maxDelayLevel) {
+            const autoBuyDelayCost = Math.floor(getAutoBuyDelayCost(autoBuyDelayLevel) * getCostReductionMultiplier());
+            if (totalMessages >= autoBuyDelayCost) count++;
+        }
+        
+        // Check prestige (only if all upgrades are maxed)
+        if (isGenerator1AllMaxed()) {
+            const prestigeCost = getPrestigeCost('generator1');
+            if (totalMessages >= prestigeCost) count++;
+        }
+        
+        return count > 0 ? count : null;
+    }
+    
+    if (serverId === 'generator2') {
+        // Only count if generator2 is unlocked
+        if (!isGeneratorUnlocked('generator2')) {
+            return null;
+        }
+        
+        const gen2 = gameState.generators.generator2 || { cascades: 0, cascadeEfficiency: 0.1, autoBuyPurchased: false, autoBuyDelayLevel: 0 };
+        const maxLevels = getGenerator2MaxLevels();
+        let count = 0;
+        
+        // Check cascades (need 1 bot from generator1 and messages)
+        if ((gen2.cascades || 0) < maxLevels.cascades) {
+            const gen1 = gameState.generators.generator1 || { bots: 0 };
+            const gen1Bots = gen1.bots || 0;
+            const hasGen1Bot = gen1Bots >= 1;
+            if (hasGen1Bot) {
+                const cascadeCost = Math.floor(getCascadeCost(gen2.cascades || 0) * getCostReductionMultiplier());
+                if (totalMessages >= cascadeCost) {
+                    count++;
+                }
+            }
+        }
+        
+        // Check cascade efficiency (always available, doesn't require cascades)
+        const cascadeEfficiency = gen2.cascadeEfficiency || 0.1;
+        const efficiencyLevel = Math.floor(Math.log(cascadeEfficiency / 0.1) / Math.log(1.1));
+        if (efficiencyLevel < maxLevels.cascadeEfficiency) {
+            const efficiencyCost = Math.floor(getCascadeEfficiencyUpgradeCost(cascadeEfficiency) * getCostReductionMultiplier());
+            if (totalMessages >= efficiencyCost) {
+                count++;
+            }
+        }
+        
+        // Check auto-buy purchase
+        if (gen2.autoBuyPurchased !== true) {
+            const autoBuyCost = 50000;
+            if (totalMessages >= autoBuyCost) {
+                count++;
+            }
+        }
+        
+        // Check auto-buy delay (available even before auto-buy is purchased)
+        const autoBuyDelayLevel = gen2.autoBuyDelayLevel || 0;
+        if (autoBuyDelayLevel < maxLevels.autoBuyDelay) {
+            const autoBuyDelayCost = Math.floor(getGenerator2AutoBuyDelayCost(autoBuyDelayLevel) * getCostReductionMultiplier());
+            if (totalMessages >= autoBuyDelayCost) {
+                count++;
+            }
+        }
+        
+        // Check prestige (only if all upgrades are maxed)
+        if (isGenerator2AllMaxed()) {
+            const prestigeCost = getPrestigeCost('generator2');
+            if (totalMessages >= prestigeCost) {
+                count++;
+            }
+        }
+        
+        return count > 0 ? count : null;
+    }
+    
+    if (serverId === 'generator3') {
+        if (!isGeneratorUnlocked('generator3')) return null;
+        
+        const researchPoints = getResearchPoints();
+        const research = gameState.research || { globalBoostPurchased: false, manualProduction: 0, botProduction: 0, cascadeProduction: 0 };
+        let count = 0;
+        
+        // Check global boost
+        if (!research.globalBoostPurchased) {
+            const globalBoostCost = 10;
+            if (researchPoints >= globalBoostCost) count++;
+        }
+        
+        // Check manual production (requires global boost)
+        if (research.globalBoostPurchased) {
+            const manualLevel = research.manualProduction || 0;
+            if (manualLevel < 5) {
+                const manualCost = getResearchUpgradeCost(manualLevel);
+                if (researchPoints >= manualCost) count++;
+            }
+            
+            // Check bot production
+            const botLevel = research.botProduction || 0;
+            if (botLevel < 5) {
+                const botCost = getResearchUpgradeCost(botLevel);
+                if (researchPoints >= botCost) count++;
+            }
+            
+            // Check cascade production
+            const cascadeLevel = research.cascadeProduction || 0;
+            if (cascadeLevel < 5) {
+                const cascadeCost = getResearchUpgradeCost(cascadeLevel);
+                if (researchPoints >= cascadeCost) count++;
+            }
+        }
+        
+        return count > 0 ? count : null;
+    }
+    
+    // Global upgrades server
+    if (serverId === 'upgrades') {
+        let count = 0;
+        const upgrades = gameState.upgrades || {};
+        
+        // Manual generation multiplier (max 25)
+        const manualMultLevel = upgrades.manualGenerationMultiplier || 0;
+        if (manualMultLevel < 25) {
+            const cost = Math.floor(getManualGenerationUpgradeCost(manualMultLevel) * getCostReductionMultiplier());
+            if (totalMessages >= cost) count++;
+        }
+        
+        // Message multiplier (max 10)
+        const messageMultLevel = upgrades.messageMultiplier || 0;
+        if (messageMultLevel < 10) {
+            const cost = Math.floor(getMessageMultiplierCost(messageMultLevel) * getCostReductionMultiplier());
+            if (totalMessages >= cost) count++;
+        }
+        
+        // Auto-generation boost (max 10)
+        const autoGenBoostLevel = upgrades.autoGenerationBoost || 0;
+        if (autoGenBoostLevel < 10) {
+            const cost = Math.floor(getAutoGenerationBoostCost(autoGenBoostLevel) * getCostReductionMultiplier());
+            if (totalMessages >= cost) count++;
+        }
+        
+        // Cost efficiency (max 10)
+        const costEfficiencyLevel = upgrades.costEfficiency || 0;
+        if (costEfficiencyLevel < 10) {
+            const cost = Math.floor(getCostEfficiencyCost(costEfficiencyLevel) * getCostReductionMultiplier());
+            if (totalMessages >= cost) count++;
+        }
+        
+        return count > 0 ? count : null;
+    }
+    
+    // Home and settings don't have pings
+    return null;
+}
+
+// Update all server ping badges
+function updateServerPings() {
+    const serverIcons = document.querySelectorAll('.server-icon');
+    serverIcons.forEach(icon => {
+        const serverId = icon.dataset.server;
+        if (!serverId) return;
+        
+        const pingCount = getServerPingCount(serverId);
+        let pingBadge = icon.querySelector('.server-ping');
+        
+        if (pingCount) {
+            if (!pingBadge) {
+                pingBadge = document.createElement('div');
+                pingBadge.className = 'server-ping';
+                icon.appendChild(pingBadge);
+            }
+            pingBadge.textContent = pingCount;
+        } else {
+            if (pingBadge) {
+                pingBadge.remove();
+            }
+        }
+    });
+}
+
 // Render server sidebar
 function renderServerSidebar() {
     const sidebar = document.getElementById('server-sidebar');
@@ -278,6 +509,9 @@ function renderServerSidebar() {
     
     // Re-setup click handlers
     setupServerIcons();
+    
+    // Update pings after rendering
+    updateServerPings();
 }
 
 // Create a server icon element
@@ -690,6 +924,7 @@ function init() {
     // Track last playtime update
     let lastPlaytimeUpdate = Date.now();
     let lastUpgradeUIUpdate = 0; // Track last upgrade UI update
+    let lastPingUpdate = 0; // Track last ping update
     let lastAutoBuyTime = 0; // Track last auto-buy purchase time (generator1)
     let lastGenerator2AutoBuyTime = 0; // Track last auto-buy purchase time (generator2)
     
@@ -744,6 +979,29 @@ function init() {
             }
         }
         
+        // Auto-buy cascades if enabled (with delay)
+        if (isGeneratorUnlocked('generator2')) {
+            const gen2 = gameState.generators.generator2;
+            if (gen2 && gen2.autoBuy) {
+                const gen1 = gameState.generators.generator1;
+                const totalMessages = gameState.messages + (gameState.fractionalMessages || 0);
+                const maxLevels = getGenerator2MaxLevels();
+                const currentCascades = gen2.cascades || 0;
+                const gen1Bots = gen1 ? (gen1.bots || 0) : 0;
+                const hasGen1Bot = gen1Bots >= 1;
+                const delay = getAutoBuyDelay(gen2.autoBuyDelayLevel || 0);
+                const now = Date.now();
+                
+                if (currentCascades < maxLevels.cascades && hasGen1Bot && (now - lastGenerator2AutoBuyTime) >= (delay * 1000)) {
+                    const cascadeCost = Math.floor(getCascadeCost(currentCascades) * getCostReductionMultiplier());
+                    if (totalMessages >= cascadeCost) {
+                        purchaseCascade();
+                        lastGenerator2AutoBuyTime = now;
+                    }
+                }
+            }
+        }
+        
         // Always update display to show decimal changes and rate updates
         updateCurrencyDisplay();
         
@@ -752,12 +1010,18 @@ function init() {
                                  (currentServer === 'generator2' && currentChannel === 'general') ||
                                  (currentServer === 'upgrades' && currentChannel === 'global1') ||
                                  (currentServer === 'generator3' && currentChannel === 'research');
+        const now = Date.now();
         if (isUpgradeChannel) {
-            const now = Date.now();
             if (!lastUpgradeUIUpdate || now - lastUpgradeUIUpdate > 500) {
                 lastUpgradeUIUpdate = now;
                 updateUpgradeButtonStates();
             }
+        }
+        
+        // Update server pings periodically (every 500ms)
+        if (!lastPingUpdate || now - lastPingUpdate > 500) {
+            lastPingUpdate = now;
+            updateServerPings();
         }
     }, 100);
     
@@ -3251,6 +3515,7 @@ function purchaseGenerator2AutoBuy() {
         gen2.autoBuy = true; // Enable by default when purchased
         autoSave();
         updateCurrencyDisplay();
+        updateServerPings(); // Update pings immediately after purchase
         
         // Refresh UI if on generator2 channel to show toggle button
         if (currentServer === 'generator2' && currentChannel === 'general') {
@@ -4353,9 +4618,16 @@ function setupSettingsHandlers() {
                     messageMultiplier: 0,
                     costEfficiency: 0
                 };
+                gameState.research = {
+                    globalBoostPurchased: false,
+                    manualProduction: 0,
+                    botProduction: 0,
+                    cascadeProduction: 0
+                };
                 gameState.generators = {
                     unlocked: [],
-                    generator1: { bots: 0, efficiency: 1.0, botSpeed: 0, autoBuy: false, autoBuyPurchased: false, autoBuyDelayLevel: 0, prestigeLevel: 0 }
+                    generator1: { bots: 0, efficiency: 1.0, botSpeed: 0, autoBuy: false, autoBuyPurchased: false, autoBuyDelayLevel: 0, prestigeLevel: 0 },
+                    generator2: { cascades: 0, cascadeEfficiency: 0.1, autoBuy: false, autoBuyPurchased: false, autoBuyDelayLevel: 0, prestigeLevel: 0 }
                 };
                 
                 // Only remove gameState from localStorage, keep gameSettings
@@ -4669,8 +4941,22 @@ function renderChangelog() {
     // Use new Date() to get the current date when the entry is created
     const changelog = [
         {
+            version: 'beta 1.0.4',
+            date: '2025-12-07', // Release date
+            changes: [
+                'Added server ping notification system - shows number of affordable upgrades on each server',
+                'Locked servers show "!" ping when they can be unlocked',
+                'Unlocked servers show count of affordable upgrades (excludes maxed upgrades)',
+                'Pings update dynamically as messages/research points accumulate',
+                'All generator servers, global upgrades server, and research upgrades are tracked',
+                'Prestige upgrades included in ping count when all other upgrades are maxed',
+                'Fixed: Research tree upgrades now reset when using the reset game button',
+                'Fixed: Generator 2 cascade auto-buy now works correctly'
+            ]
+        },
+        {
             version: 'beta 1.0.3',
-            date: formatDate(new Date()), // Today's date
+            date: '2025-12-06', // Release date
             changes: [
                 'Added Generator 3: Research Lab (unlocks at 100,000 messages)',
                 'Research Points: 1 point per 10,000 current messages',
@@ -4686,7 +4972,7 @@ function renderChangelog() {
         },
         {
             version: 'beta 1.0.2',
-            date: formatDate(new Date()), // Today's date
+            date: '2025-12-06', // Release date
             changes: [
                 'Added server prestige system - reset generator upgrades to increase max levels by 10',
                 'Added prestige level display to stats channel',
@@ -4701,14 +4987,14 @@ function renderChangelog() {
         },
         {
             version: 'beta 1.0.1',
-            date: formatDate(new Date()), // Today's date
+            date: '2025-12-06', // Release date
             changes: [
                 'Added Discord embed support for link sharing'
             ]
         },
         {
             version: 'beta 1.0.0',
-            date: formatDate(new Date()), // Today's date
+            date: '2025-12-06', // Release date
             changes: [
                 'Initial release'
             ]
