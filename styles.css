@@ -251,6 +251,7 @@ body {
     color: #96989d;
     font-size: 16px;
     transition: background-color 0.15s ease;
+    position: relative;
 }
 
 .channel-item:hover {
@@ -263,9 +264,106 @@ body {
     color: var(--text-bright);
 }
 
+.channel-item-dm {
+    padding: 10px 8px;
+    min-height: 44px;
+}
+
 .channel-hash {
+    width: 16px;
+    height: 16px;
     margin-right: 6px;
+    opacity: 0.7;
+    transition: opacity 0.15s ease, filter 0.15s ease;
+    /* Convert black SVG to match channel text color (#96989d when inactive) */
+    filter: brightness(0) saturate(100%) invert(59%) sepia(3%) saturate(251%) hue-rotate(202deg) brightness(94%) contrast(93%);
+}
+
+.channel-item:hover .channel-hash {
+    opacity: 0.9;
+    /* Slightly brighter on hover */
+    filter: brightness(0) saturate(100%) invert(65%) sepia(3%) saturate(251%) hue-rotate(202deg) brightness(100%) contrast(93%);
+}
+
+.channel-item.active .channel-hash {
+    opacity: 1;
+    /* White/bright color when active to match --text-bright */
+    filter: brightness(0) saturate(100%) invert(100%);
+}
+
+.channel-icon {
+    width: 16px;
+    height: 16px;
+    margin-right: 10px;
+    opacity: 0.7;
+    transition: opacity 0.15s ease, filter 0.15s ease;
+    /* Convert black SVG to match channel text color (#96989d when inactive) */
+    filter: brightness(0) saturate(100%) invert(59%) sepia(3%) saturate(251%) hue-rotate(202deg) brightness(94%) contrast(93%);
+}
+
+.channel-item:hover .channel-icon {
+    opacity: 0.9;
+    /* Slightly brighter on hover */
+    filter: brightness(0) saturate(100%) invert(65%) sepia(3%) saturate(251%) hue-rotate(202deg) brightness(100%) contrast(93%);
+}
+
+.channel-item.active .channel-icon {
+    opacity: 1;
+    /* White/bright color when active to match --text-bright */
+    filter: brightness(0) saturate(100%) invert(100%);
+}
+
+.channel-avatar {
+    width: 32px;
+    height: 32px;
+    margin-right: 8px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    flex-shrink: 0;
+    background-color: var(--bg-color);
+    line-height: 1;
+    position: relative;
+    border: 2px solid var(--bg-dark);
+}
+
+.channel-avatar-online {
+    position: absolute;
+    bottom: -1px;
+    right: -1px;
+    width: 13px;
+    height: 13px;
+    border-radius: 50%;
+    background-color: #23a55a;
+    border: 2px solid var(--bg-dark);
+    z-index: 1;
+}
+
+.channel-divider {
+    width: 100%;
+    height: 1px;
+    background-color: var(--text-muted);
+    opacity: 0.3;
+    margin: 8px 0;
+}
+
+.channel-ping {
+    position: absolute;
+    right: 8px;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 4px;
+    background-color: #ed4245;
+    border-radius: 9px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
     font-weight: 600;
+    color: #ffffff;
+    line-height: 1;
 }
 
 /* Main Content */
@@ -336,6 +434,15 @@ body {
     font-size: 16px;
     font-weight: 600;
     color: var(--text-bright);
+    gap: 6px;
+}
+
+.channel-title .channel-hash {
+    width: 16px;
+    height: 16px;
+    opacity: 1;
+    /* White/bright color to match channel title text */
+    filter: brightness(0) saturate(100%) invert(100%);
 }
 
 .content-body {
@@ -486,6 +593,15 @@ body {
     padding: 16px;
     background-color: var(--bg-color);
     border-top: 1px solid rgba(4, 4, 5, 0.3);
+}
+
+.dm-counter {
+    text-align: center;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+    padding: 4px 0;
 }
 
 .chat-input-wrapper {

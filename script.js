@@ -54,6 +54,18 @@ let gameState = {
             autoBuyDelayLevel: 0, // Level of auto-buy delay reduction upgrade
             prestigeLevel: 0 // Number of times this generator has been prestiged
         }
+    },
+    dmCharacters: 0, // Characters typed in RemagOfficial DM
+    dmRewardClaimed: false, // Whether the DM typing reward has been claimed
+    dmMessageTimestamps: {
+        message1: null, // Timestamp for first message
+        message2: null, // Timestamp for second message
+        rewardMessage: null // Timestamp for reward message (set when reaching 1000)
+    },
+    dmPings: {
+        message1: false, // Ping for first message
+        message2: false, // Ping for second message
+        rewardMessage: false // Ping for reward message
     }
 };
 
@@ -101,8 +113,10 @@ const servers = {
     home: {
         name: 'Home',
         channels: {
-            manual: { name: 'manual-generation', content: 'Manual generation content goes here' },
-            stats: { name: 'stats', content: 'Game statistics will be displayed here' }
+            manual: { name: 'Manual Generation', content: 'Manual generation content goes here' },
+            stats: { name: 'Stats', content: 'Game statistics will be displayed here' },
+            achievements: { name: 'Achievements', content: 'Game achievements and milestones' },
+            remagofficial: { name: 'RemagOfficial', content: 'Direct message with RemagOfficial', isDM: true, avatar: '🐱' }
         }
     },
     generator1: {
@@ -430,7 +444,17 @@ function getServerPingCount(serverId) {
         return count > 0 ? count : null;
     }
     
-    // Home and settings don't have pings
+    // Home server: check for DM pings
+    if (serverId === 'home') {
+        const dmPings = gameState.dmPings || { message1: false, message2: false, rewardMessage: false };
+        let count = 0;
+        if (dmPings.message1) count++;
+        if (dmPings.message2) count++;
+        if (dmPings.rewardMessage) count++;
+        return count > 0 ? count : null;
+    }
+    
+    // Settings don't have pings
     return null;
 }
 
@@ -684,7 +708,14 @@ function getGeneratorProduction(generatorId) {
 function getGlobalMessageMultiplier() {
     const multiplierLevel = gameState.upgrades.messageMultiplier || 0;
     // Each level multiplies by 1.05 (compounding: 1.0, 1.05, 1.1025, 1.1576, ...)
-    return Math.pow(1.05, multiplierLevel);
+    let multiplier = Math.pow(1.05, multiplierLevel);
+    
+    // Apply DM reward boost (+15% = 1.15x)
+    if (gameState.dmRewardClaimed) {
+        multiplier *= 1.15;
+    }
+    
+    return multiplier;
 }
 
 // Get cost reduction multiplier
@@ -933,8 +964,40 @@ function init() {
         // Update playtime based on actual elapsed time
         const currentTime = Date.now();
         const elapsed = currentTime - lastPlaytimeUpdate;
-        gameState.playtime = (gameState.playtime || 0) + elapsed;
+        const previousPlaytime = gameState.playtime || 0;
+        gameState.playtime = previousPlaytime + elapsed;
         lastPlaytimeUpdate = currentTime;
+        
+        // Check if first DM message should appear (10 minutes playtime)
+        const tenMinutes = 10 * 60 * 1000; // 10 minutes in milliseconds
+        const justReachedTenMinutes = previousPlaytime < tenMinutes && gameState.playtime >= tenMinutes;
+        if (justReachedTenMinutes) {
+            // Initialize timestamps if needed
+            if (!gameState.dmMessageTimestamps) {
+                gameState.dmMessageTimestamps = {
+                    message1: null,
+                    message2: null,
+                    rewardMessage: null
+                };
+            }
+            // Set first message timestamp
+            if (!gameState.dmMessageTimestamps.message1) {
+                gameState.dmMessageTimestamps.message1 = currentTime;
+                // Set ping if channel is not currently open
+                if (!(currentServer === 'home' && currentChannel === 'remagofficial')) {
+                    if (!gameState.dmPings) {
+                        gameState.dmPings = { message1: false, message2: false, rewardMessage: false };
+                    }
+                    gameState.dmPings.message1 = true;
+                    updateServerPings();
+                    // Reload server to show channel and update channel list ping
+                    if (currentServer === 'home') {
+                        loadServer('home');
+                    }
+                }
+                autoSave();
+            }
+        }
         
         let totalProduction = 0;
         
@@ -1941,6 +2004,14 @@ function loadServer(serverId) {
     // Add channels
     const channelIds = Object.keys(server.channels);
     channelIds.forEach((channelId, index) => {
+        // Hide DM channel until first message should appear (10 minutes playtime)
+        if (serverId === 'home' && channelId === 'remagofficial') {
+            const playtime = gameState.playtime || 0;
+            const tenMinutes = 10 * 60 * 1000; // 10 minutes in milliseconds
+            if (playtime < tenMinutes) {
+                return; // Skip rendering this channel
+            }
+        }
         // Only add category header for non-home servers
         if (!isHomeServer && (index === 0 || index % 3 === 0)) {
             const category = document.createElement('div');
@@ -1956,19 +2027,76 @@ function loadServer(serverId) {
         }
         channelItem.dataset.channel = channelId;
         
-        // Only add hash for non-home servers
+        // Only add hash icon for non-home servers
         if (!isHomeServer) {
-            const hash = document.createElement('span');
+            const hash = document.createElement('img');
             hash.className = 'channel-hash';
-            hash.textContent = '#';
+            hash.src = 'assets/hashtag.svg';
+            hash.alt = '#';
             channelItem.appendChild(hash);
+        }
+        
+        // Add icon or avatar for home server channels
+        if (serverId === 'home') {
+            const channel = server.channels[channelId];
+            // Check if this is a DM channel
+            if (channel.isDM && channel.avatar) {
+                // Add DM class to make channel taller
+                channelItem.classList.add('channel-item-dm');
+                // Create DM-style avatar with emoji
+                const avatar = document.createElement('div');
+                avatar.className = 'channel-avatar';
+                avatar.textContent = channel.avatar;
+                
+                // Add online indicator
+                const onlineIndicator = document.createElement('div');
+                onlineIndicator.className = 'channel-avatar-online';
+                avatar.appendChild(onlineIndicator);
+                
+                channelItem.appendChild(avatar);
+            } else {
+                // Regular channel with icon
+                const icon = document.createElement('img');
+                icon.className = 'channel-icon';
+                if (channelId === 'manual') {
+                    icon.src = 'assets/envelope.svg';
+                    icon.alt = 'Manual Generation';
+                } else if (channelId === 'stats') {
+                    icon.src = 'assets/signal.svg';
+                    icon.alt = 'Stats';
+                } else if (channelId === 'achievements') {
+                    icon.src = 'assets/gem.svg';
+                    icon.alt = 'Achievements';
+                }
+                channelItem.appendChild(icon);
+            }
         }
         
         const name = document.createElement('span');
         name.textContent = server.channels[channelId].name;
         
         channelItem.appendChild(name);
+        
+        // Add ping badge for DM channel if there's a ping
+        if (serverId === 'home' && channelId === 'remagofficial') {
+            const dmPings = gameState.dmPings || { message1: false, message2: false, rewardMessage: false };
+            const hasPing = dmPings.message1 || dmPings.message2 || dmPings.rewardMessage;
+            if (hasPing) {
+                const pingBadge = document.createElement('div');
+                pingBadge.className = 'channel-ping';
+                pingBadge.textContent = '1';
+                channelItem.appendChild(pingBadge);
+            }
+        }
+        
         channelList.appendChild(channelItem);
+        
+        // Add divider after achievements channel in home server
+        if (serverId === 'home' && channelId === 'achievements') {
+            const divider = document.createElement('div');
+            divider.className = 'channel-divider';
+            channelList.appendChild(divider);
+        }
     });
     
     // Load channel: prefer saved channel for this server, then current channel, then first channel
@@ -1999,6 +2127,17 @@ function loadServer(serverId) {
 // Load a channel and update the content
 function loadChannel(channelId) {
     if (!servers[currentServer] || !servers[currentServer].channels[channelId]) return;
+    
+    // Prevent accessing DM channel before 10 minutes playtime
+    if (currentServer === 'home' && channelId === 'remagofficial') {
+        const playtime = gameState.playtime || 0;
+        const tenMinutes = 10 * 60 * 1000; // 10 minutes in milliseconds
+        if (playtime < tenMinutes) {
+            // Redirect to manual channel if trying to access DM before it's available
+            loadChannel('manual');
+            return;
+        }
+    }
     
     // Clear stats update interval if switching away from stats
     if (statsUpdateInterval && currentChannel === 'stats' && channelId !== 'stats') {
@@ -2031,11 +2170,12 @@ function loadChannel(channelId) {
         existingHash.remove();
     }
     
-    // Add hash for non-home servers
+    // Add hash icon for non-home servers
     if (!isHomeServer) {
-        const hash = document.createElement('span');
+        const hash = document.createElement('img');
         hash.className = 'channel-hash';
-        hash.textContent = '#';
+        hash.src = 'assets/hashtag.svg';
+        hash.alt = '#';
         channelTitleElement.insertBefore(hash, channelTitle);
     }
     
@@ -3070,6 +3210,12 @@ function loadChannel(channelId) {
                             <span class="stat-label">Playtime:</span>
                             <span class="stat-value" id="playtime-display">${playtime}</span>
                         </div>
+                        ${gameState.dmRewardClaimed ? `
+                        <div class="stat-item">
+                            <span class="stat-label">DM Boost:</span>
+                            <span class="stat-value">+15%</span>
+                        </div>
+                        ` : ''}
                     </div>
                 </div>
                 
@@ -3124,6 +3270,274 @@ function loadChannel(channelId) {
                 playtimeDisplay.textContent = formatPlaytime(gameState.playtime || 0);
             }
         }, 1000);
+    } else if (channelId === 'achievements' && currentServer === 'home') {
+        // Achievements channel
+        contentBody.innerHTML = `
+            <div class="settings-content">
+                <div class="settings-section">
+                    <h3 class="settings-title">Achievements</h3>
+                    <p class="settings-description">View your achievements and milestones.</p>
+                    <div class="achievements-container" id="achievements-container">
+                        <!-- Achievements will be displayed here -->
+                    </div>
+                </div>
+            </div>
+        `;
+    } else if (channelId === 'remagofficial' && currentServer === 'home') {
+        // RemagOfficial DM channel
+        const dmChars = gameState.dmCharacters || 0;
+        const maxChars = 5000;
+        const hasReachedMax = dmChars >= maxChars;
+        const rewardClaimed = gameState.dmRewardClaimed || false;
+        
+        // Initialize or get stored message timestamps
+        if (!gameState.dmMessageTimestamps) {
+            gameState.dmMessageTimestamps = {
+                message1: null,
+                message2: null,
+                rewardMessage: null
+            };
+        }
+        
+        const timestamps = gameState.dmMessageTimestamps;
+        const now = Date.now();
+        const playtime = gameState.playtime || 0;
+        const tenMinutes = 10 * 60 * 1000; // 10 minutes in milliseconds
+        
+        // Check if first message should appear (10 minutes playtime)
+        const showFirstMessage = playtime >= tenMinutes;
+        
+        // Set first message timestamp when playtime reaches 10 minutes
+        if (showFirstMessage && !timestamps.message1) {
+            timestamps.message1 = now;
+            autoSave();
+            // Set ping if channel is not currently open
+            if (!(currentServer === 'home' && currentChannel === 'remagofficial')) {
+                if (!gameState.dmPings) {
+                    gameState.dmPings = { message1: false, message2: false, rewardMessage: false };
+                }
+                gameState.dmPings.message1 = true;
+                autoSave();
+                updateServerPings();
+                // Reload server to show channel and update channel list ping
+                if (currentServer === 'home') {
+                    loadServer('home');
+                }
+            }
+        }
+        
+        // Clear first message ping when channel is opened
+        if (showFirstMessage && timestamps.message1) {
+            if (gameState.dmPings && gameState.dmPings.message1) {
+                gameState.dmPings.message1 = false;
+                autoSave();
+                updateServerPings();
+                // Reload server to update channel list ping
+                if (currentServer === 'home') {
+                    loadServer('home');
+                }
+            }
+        }
+        
+        // Check if enough time has passed to show second message (1 minute after first)
+        const timeSinceFirst = timestamps.message1 ? (now - timestamps.message1) : 0;
+        const showSecondMessage = showFirstMessage && timestamps.message1 && timeSinceFirst >= 60000; // 1 minute = 60000ms
+        
+        // Set second message timestamp when it first becomes visible
+        if (showSecondMessage && !timestamps.message2) {
+            timestamps.message2 = timestamps.message1 + 60000; // 1 minute after first
+            autoSave();
+            // Set ping if channel is not currently open
+            if (!(currentServer === 'home' && currentChannel === 'remagofficial')) {
+                if (!gameState.dmPings) {
+                    gameState.dmPings = { message2: false, rewardMessage: false };
+                }
+                gameState.dmPings.message2 = true;
+                autoSave();
+                updateServerPings();
+                // Reload server to update channel list ping
+                if (currentServer === 'home') {
+                    loadServer('home');
+                }
+            }
+        }
+        
+        // Set reward message timestamp when reaching max (only once)
+        if (hasReachedMax && !timestamps.rewardMessage) {
+            // Set it to 1 minute after second message, or 2 minutes after first if second doesn't exist yet
+            const baseTime = timestamps.message2 || (timestamps.message1 + 60000);
+            timestamps.rewardMessage = baseTime + 60000; // 1 minute after second message
+            autoSave();
+            // Set ping if channel is not currently open
+            if (!(currentServer === 'home' && currentChannel === 'remagofficial')) {
+                if (!gameState.dmPings) {
+                    gameState.dmPings = { message2: false, rewardMessage: false };
+                }
+                gameState.dmPings.rewardMessage = true;
+                autoSave();
+                updateServerPings();
+                // Reload server to update channel list ping
+                if (currentServer === 'home') {
+                    loadServer('home');
+                }
+            }
+        }
+        
+        // Initialize DM pings if they don't exist
+        if (!gameState.dmPings) {
+            gameState.dmPings = {
+                message2: false,
+                rewardMessage: false
+            };
+        }
+        
+        // Check if second message should have a ping (exists but channel wasn't open when it appeared)
+        if (showSecondMessage && timestamps.message2) {
+            // Clear ping when channel is opened
+            if (gameState.dmPings.message2) {
+                gameState.dmPings.message2 = false;
+                autoSave();
+                updateServerPings();
+                // Reload server to update channel list ping
+                if (currentServer === 'home') {
+                    loadServer('home');
+                }
+            }
+        }
+        
+        // Check if reward message should have a ping (exists but channel wasn't open when it appeared)
+        if (hasReachedMax && timestamps.rewardMessage) {
+            // Clear ping when channel is opened
+            if (gameState.dmPings.rewardMessage) {
+                gameState.dmPings.rewardMessage = false;
+                autoSave();
+                updateServerPings();
+                // Reload server to update channel list ping
+                if (currentServer === 'home') {
+                    loadServer('home');
+                }
+            }
+        }
+        
+        const timestamp1 = timestamps.message1 ? formatMessageTime(new Date(timestamps.message1)) : formatMessageTime(new Date(now));
+        const timestamp2 = timestamps.message2 ? formatMessageTime(new Date(timestamps.message2)) : formatMessageTime(new Date((timestamps.message1 || now) + 60000));
+        const timestamp3 = timestamps.rewardMessage ? formatMessageTime(new Date(timestamps.rewardMessage)) : formatMessageTime(new Date(now + 60000));
+        
+        let rewardMessageHtml = '';
+        if (hasReachedMax) {
+            const buttonHtml = !rewardClaimed ? `
+                            <div style="margin-top: 12px;">
+                                <button class="upgrade-button" id="claim-dm-reward" style="width: auto; padding: 8px 16px;">
+                                    <span class="upgrade-button-text">Claim +15% Production Boost</span>
+                                </button>
+                            </div>
+            ` : `
+                            <div style="margin-top: 8px; color: var(--text-muted); font-size: 14px;">
+                                ✓ Reward claimed
+                            </div>
+            `;
+            rewardMessageHtml = `
+                    <div class="discord-message">
+                        <div class="message-avatar">🐱</div>
+                        <div class="message-content">
+                            <div class="message-header">
+                                <span class="message-username">RemagOfficial</span>
+                                <span class="message-timestamp">${timestamp3}</span>
+                            </div>
+                            <div class="message-text">Well done there player! here's a little boost to your production</div>
+                            ${buttonHtml}
+                        </div>
+                    </div>
+            `;
+        }
+        
+        // Only show messages if first message should be visible
+        const firstMessageHtml = showFirstMessage ? `
+                    <div class="discord-message">
+                        <div class="message-avatar">🐱</div>
+                        <div class="message-content">
+                            <div class="message-header">
+                                <span class="message-username">RemagOfficial</span>
+                                <span class="message-timestamp">${timestamp1}</span>
+                            </div>
+                            <div class="message-text">Hey! thanks for playing my game, i hope youre enjoying it</div>
+                        </div>
+                    </div>
+        ` : '';
+        
+        contentBody.innerHTML = `
+            <div class="manual-generation-content">
+                <div class="messages-container" id="messages-container">
+                    ${firstMessageHtml}
+                    ${showSecondMessage ? `
+                    <div class="discord-message">
+                        <div class="message-avatar">🐱</div>
+                        <div class="message-content">
+                            <div class="message-header">
+                                <span class="message-username">RemagOfficial</span>
+                                <span class="message-timestamp">${timestamp2}</span>
+                            </div>
+                            <div class="message-text">btw if you type a bit in my DMs maybe ill give you a reward...</div>
+                        </div>
+                    </div>
+                    ` : ''}
+                    ${rewardMessageHtml}
+                </div>
+            </div>
+            <div class="chat-input-container">
+                <div class="dm-counter" id="dm-counter">${formatNumber(Math.min(dmChars, maxChars), 0)}/${formatNumber(maxChars, 0)}</div>
+                <div class="chat-input-wrapper">
+                    <input type="text" class="chat-input" id="dm-input" placeholder="Message @RemagOfficial" autocomplete="off" ${hasReachedMax ? 'disabled' : ''} />
+                    <button class="send-button" id="dm-send-button" title="Send message" ${hasReachedMax ? 'disabled' : ''}>
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        `;
+        
+        // Setup DM input tracking
+        setupDMInput();
+        
+        // Setup reward claim button
+        if (hasReachedMax && !rewardClaimed) {
+            const claimButton = document.getElementById('claim-dm-reward');
+            if (claimButton) {
+                claimButton.addEventListener('click', () => {
+                    gameState.dmRewardClaimed = true;
+                    autoSave();
+                    updateCurrencyDisplay();
+                    // Reload channel to update UI
+                    loadChannel('remagofficial');
+                });
+            }
+        }
+        
+        // If second message hasn't appeared yet, set up a timeout to show it
+        if (!showSecondMessage && timestamps.message1) {
+            const timeUntilSecond = 60000 - timeSinceFirst;
+            if (timeUntilSecond > 0) {
+                setTimeout(() => {
+                    // Set ping if channel is not open
+                    if (!(currentServer === 'home' && currentChannel === 'remagofficial')) {
+                        if (!gameState.dmPings) {
+                            gameState.dmPings = { message2: false, rewardMessage: false };
+                        }
+                        gameState.dmPings.message2 = true;
+                        autoSave();
+                        updateServerPings();
+                        // Reload server to update channel list ping
+                        if (currentServer === 'home') {
+                            loadServer('home');
+                        }
+                    } else {
+                        // Only reload if we're still on this channel
+                        loadChannel('remagofficial');
+                    }
+                }, timeUntilSecond);
+            }
+        }
     } else {
         contentBody.innerHTML = `
             <div class="welcome-message">
@@ -3209,6 +3623,30 @@ function loadGameState() {
             // Ensure sessionStartTime exists
             if (!gameState.sessionStartTime) {
                 gameState.sessionStartTime = Date.now();
+            }
+            // Ensure dmCharacters exists
+            if (gameState.dmCharacters === undefined) {
+                gameState.dmCharacters = 0;
+            }
+            // Ensure dmRewardClaimed exists
+            if (gameState.dmRewardClaimed === undefined) {
+                gameState.dmRewardClaimed = false;
+            }
+            // Ensure dmMessageTimestamps exists
+            if (!gameState.dmMessageTimestamps) {
+                gameState.dmMessageTimestamps = {
+                    message1: null,
+                    message2: null,
+                    rewardMessage: null
+                };
+            }
+            // Ensure dmPings exists
+            if (!gameState.dmPings) {
+                gameState.dmPings = {
+                    message1: false,
+                    message2: false,
+                    rewardMessage: false
+                };
             }
             // Ensure generators exist
             if (!gameState.generators) {
@@ -4243,6 +4681,183 @@ function setupManualGeneration() {
     }, 100);
 }
 
+// Setup DM input for RemagOfficial channel
+function setupDMInput() {
+    const input = document.getElementById('dm-input');
+    const sendButton = document.getElementById('dm-send-button');
+    const counter = document.getElementById('dm-counter');
+    
+    if (!input || !counter) return;
+    
+    const maxChars = 5000;
+    let pressedKeys = new Set();
+    
+    // Update counter display
+    function updateCounter() {
+        const current = gameState.dmCharacters || 0;
+        const capped = Math.min(current, maxChars);
+        // Cap the actual value to prevent going over
+        if (current > maxChars) {
+            gameState.dmCharacters = maxChars;
+        }
+        counter.textContent = `${formatNumber(capped, 0)}/${formatNumber(maxChars, 0)}`;
+        autoSave(); // Save progress
+        
+        // If we just reached the max, set reward message timestamp and reload channel
+        if (capped >= maxChars) {
+            // Set reward message timestamp if not already set
+            if (!gameState.dmMessageTimestamps) {
+                gameState.dmMessageTimestamps = {
+                    message1: null,
+                    message2: null,
+                    rewardMessage: null
+                };
+            }
+            if (!gameState.dmMessageTimestamps.rewardMessage) {
+                gameState.dmMessageTimestamps.rewardMessage = Date.now();
+                autoSave();
+            }
+            
+            // Set ping if channel is not open
+            if (!(currentServer === 'home' && currentChannel === 'remagofficial')) {
+                if (!gameState.dmPings) {
+                    gameState.dmPings = { message2: false, rewardMessage: false };
+                }
+                gameState.dmPings.rewardMessage = true;
+                autoSave();
+                updateServerPings();
+                // Reload server to update channel list ping
+                if (currentServer === 'home') {
+                    loadServer('home');
+                }
+            } else {
+                setTimeout(() => {
+                    loadChannel('remagofficial');
+                }, 100);
+            }
+        }
+    }
+    
+    // Handle input events
+    let lastInputTime = 0;
+    let isPasting = false;
+    input.addEventListener('input', (e) => {
+        const now = Date.now();
+        const inputValue = input.value;
+        
+        // If pasting, only count 1 character
+        if (isPasting) {
+            input.value = '';
+            e.preventDefault();
+            if (gameState.dmCharacters < maxChars) {
+                gameState.dmCharacters = (gameState.dmCharacters || 0) + 1;
+                updateCounter();
+            }
+            return;
+        }
+        
+        // Only process if there's new input and enough time has passed
+        if (inputValue.length > 0 && now - lastInputTime > 50) {
+            lastInputTime = now;
+            
+            // Limit to 1 character per input event
+            if (inputValue.length === 1 && gameState.dmCharacters < maxChars) {
+                gameState.dmCharacters = (gameState.dmCharacters || 0) + 1;
+                updateCounter();
+            }
+            
+            // Clear input
+            input.value = '';
+        }
+        
+        e.preventDefault();
+    });
+    
+    // Handle keydown for desktop
+    input.addEventListener('keydown', (e) => {
+        // Prevent default behavior and clear input
+        e.preventDefault();
+        input.value = '';
+        
+        // Only count printable characters (not special keys)
+        if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey && !pressedKeys.has(e.key)) {
+            pressedKeys.add(e.key);
+            if (gameState.dmCharacters < maxChars) {
+                gameState.dmCharacters = (gameState.dmCharacters || 0) + 1;
+                updateCounter();
+            }
+        }
+    });
+    
+    input.addEventListener('keyup', (e) => {
+        // Remove key from pressed set when released
+        pressedKeys.delete(e.key);
+    });
+    
+    input.addEventListener('paste', (e) => {
+        e.preventDefault();
+        isPasting = true;
+        
+        // Paste only counts as 1 character
+        if (gameState.dmCharacters < maxChars) {
+            gameState.dmCharacters = (gameState.dmCharacters || 0) + 1;
+            updateCounter();
+        }
+        
+        // Clear input
+        input.value = '';
+        
+        // Reset paste flag after a short delay
+        setTimeout(() => {
+            isPasting = false;
+        }, 100);
+    });
+    
+    // Send button click handler (also counts as 1 character)
+    if (sendButton) {
+        sendButton.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+        });
+        
+        sendButton.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+        });
+        
+        sendButton.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            if (input) {
+                input.blur();
+            }
+            
+            if (gameState.dmCharacters < maxChars) {
+                gameState.dmCharacters = (gameState.dmCharacters || 0) + 1;
+                updateCounter();
+            }
+        });
+        
+        sendButton.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            if (input) {
+                input.blur();
+            }
+            
+            if (gameState.dmCharacters < maxChars) {
+                gameState.dmCharacters = (gameState.dmCharacters || 0) + 1;
+                updateCounter();
+            }
+        });
+    }
+    
+    // Focus the input when channel loads
+    setTimeout(() => {
+        input.focus();
+    }, 100);
+}
+
 // Show popup number animation
 function showPopup(container, text) {
     const popup = document.createElement('div');
@@ -4630,6 +5245,20 @@ function setupSettingsHandlers() {
                     generator2: { cascades: 0, cascadeEfficiency: 0.1, autoBuy: false, autoBuyPurchased: false, autoBuyDelayLevel: 0, prestigeLevel: 0 }
                 };
                 
+                // Reset DM progress
+                gameState.dmCharacters = 0;
+                gameState.dmRewardClaimed = false;
+                gameState.dmMessageTimestamps = {
+                    message1: null,
+                    message2: null,
+                    rewardMessage: null
+                };
+                gameState.dmPings = {
+                    message1: false,
+                    message2: false,
+                    rewardMessage: false
+                };
+                
                 // Only remove gameState from localStorage, keep gameSettings
                 localStorage.removeItem('gameState');
                 
@@ -4940,6 +5569,18 @@ function renderChangelog() {
     // Changelog data - add entries here in reverse chronological order (newest first)
     // Use new Date() to get the current date when the entry is created
     const changelog = [
+        {
+            version: 'beta 1.0.5',
+            date: '2025-12-07', // Release date
+            changes: [
+                'Updated home server channels to use capitalized names without dashes',
+                'Added SVG icons to home server channels (envelope for Manual Generation, signal for Stats)',
+                'Channel icons adapt to light/dark backgrounds and match channel text colors',
+                'Added Achievements channel to home server with gem icon',
+                'Added DM system - side tasks that reward production bonuses',
+                'Replaced channel hashtags with SVG icons that adapt to text colors'
+            ]
+        },
         {
             version: 'beta 1.0.4',
             date: '2025-12-07', // Release date
