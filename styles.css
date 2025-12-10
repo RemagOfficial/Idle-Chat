@@ -418,6 +418,7 @@ body {
     padding: 8px;
     border-radius: 4px;
     transition: background-color 0.15s ease;
+    position: relative;
 }
 
 .mobile-menu-button:hover {
@@ -426,6 +427,25 @@ body {
 
 .mobile-menu-button:active {
     background-color: var(--bg-lighter);
+}
+
+.mobile-menu-ping {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    background-color: #ed4245;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 9px;
+    font-weight: 600;
+    color: #ffffff;
+    z-index: 10;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
 .channel-title {
@@ -1388,6 +1408,119 @@ body {
     .messages-container {
         max-height: calc(100dvh - 350px);
     }
+    
+    /* Mobile manual generation button */
+    .mobile-generate-button {
+        display: flex !important;
+    }
+    
+    .manual-generation-content {
+        padding-bottom: 100px;
+    }
+    
+    .chat-input-container {
+        display: none;
+    }
+    
+    /* DM channel input container should always be visible on mobile (for counter) */
+    .chat-input-container:has(.dm-counter) {
+        display: block;
+        padding-bottom: 100px; /* Add space for mobile button (60px height + 20px bottom + 20px gap) */
+    }
+    
+    /* Hide text input wrapper for DMs on mobile when mobile button is enabled */
+    .chat-input-container:has(.dm-counter) .chat-input-wrapper {
+        display: none;
+    }
+    
+    /* When text input mode is enabled, remove extra padding */
+    .use-text-input .chat-input-container:has(.dm-counter) {
+        padding-bottom: 16px;
+    }
+    
+    /* Show text input wrapper when text input mode is enabled */
+    .use-text-input .chat-input-container:has(.dm-counter) .chat-input-wrapper {
+        display: flex;
+    }
+    
+    .use-text-input .chat-input-container {
+        display: block;
+    }
+    
+    .use-text-input .mobile-generate-button {
+        display: none !important;
+    }
+    
+    .use-text-input .dm-mobile-button {
+        display: none !important;
+    }
+}
+
+/* Mobile Manual Generation Button */
+.mobile-generate-button {
+    display: none;
+    position: fixed;
+    bottom: 20px;
+    left: 20px;
+    right: 20px;
+    width: auto;
+    height: 60px;
+    border-radius: 12px;
+    background-color: var(--accent-color);
+    border: none;
+    color: var(--text-bright);
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    z-index: 100;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    pointer-events: auto;
+    box-shadow: 0 4px 16px color-mix(in srgb, var(--accent-color) 40%, transparent), 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.mobile-generate-button:active {
+    transform: scale(0.98);
+    box-shadow: 0 2px 8px color-mix(in srgb, var(--accent-color) 30%, transparent), 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.mobile-generate-button.holding {
+    background-color: var(--accent-color);
+    animation: pulse 0.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% {
+        box-shadow: 0 4px 16px color-mix(in srgb, var(--accent-color) 40%, transparent), 0 2px 4px rgba(0, 0, 0, 0.2);
+    }
+    50% {
+        box-shadow: 0 6px 24px color-mix(in srgb, var(--accent-color) 60%, transparent), 0 3px 6px rgba(0, 0, 0, 0.3);
+    }
+}
+
+.mobile-generate-icon {
+    width: 24px;
+    height: 24px;
+    fill: currentColor;
+    flex-shrink: 0;
+}
+
+.mobile-generate-label {
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.mobile-generate-subtitle {
+    font-size: 11px;
+    opacity: 0.9;
+    font-weight: 400;
 }
 
 /* Research Tree */
@@ -1540,5 +1673,100 @@ body {
     .research-node-center {
         margin-bottom: 40px;
     }
+}
+
+/* Bulk Purchase Selector */
+.bulk-purchase-selector {
+    margin-bottom: 20px;
+    padding: 12px 16px;
+    background-color: var(--bg-medium);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border: 1px solid rgba(4, 4, 5, 0.2);
+    position: relative;
+}
+
+.bulk-purchase-label {
+    color: var(--text-secondary);
+    font-weight: 600;
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-right: 4px;
+}
+
+.bulk-purchase-buttons {
+    position: relative;
+    display: flex;
+    background-color: color-mix(in srgb, var(--accent-color) 30%, transparent);
+    border-radius: 20px;
+    padding: 4px;
+    gap: 0;
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.2);
+    --button-width: calc((100%) / 5);
+}
+
+.bulk-purchase-btn {
+    position: relative;
+    padding: 8px 16px;
+    background-color: transparent;
+    color: var(--text-color);
+    border: none;
+    border-radius: 16px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    transition: color 0.2s ease;
+    font-family: inherit;
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1;
+}
+
+.bulk-purchase-btn:hover {
+    color: var(--text-bright);
+}
+
+.bulk-purchase-btn.active {
+    color: var(--text-bright);
+    font-weight: 600;
+}
+
+.bulk-purchase-buttons::before {
+    content: '';
+    position: absolute;
+    top: 4px;
+    bottom: 4px;
+    left: 4px;
+    width: var(--button-width);
+    background-color: var(--accent-color);
+    border-radius: 16px;
+    transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    z-index: 0;
+    box-shadow: 0 2px 4px rgba(88, 101, 242, 0.3);
+}
+
+.bulk-purchase-buttons[data-selected="1"]::before {
+    left: 4px;
+}
+
+.bulk-purchase-buttons[data-selected="5"]::before {
+    left: calc(4px + var(--button-width) - 10px);
+}
+
+.bulk-purchase-buttons[data-selected="10"]::before {
+    left: calc(4px + var(--button-width) * 2 - 10px);
+}
+
+.bulk-purchase-buttons[data-selected="25"]::before {
+    left: calc(4px + var(--button-width) * 3 - 10px);
+}
+
+.bulk-purchase-buttons[data-selected="50"]::before {
+    left: calc(4px + var(--button-width) * 4 - 8px);
 }
 
