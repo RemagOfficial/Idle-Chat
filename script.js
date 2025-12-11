@@ -4313,6 +4313,16 @@ function loadChannel(channelId) {
                     <p class="settings-description">This is a personal project created with AI assistance. The game code was developed with the help of AI, and the logo is AI-generated. This project is not intended as a commercial release in its current state.</p>
                     <p class="settings-description">If people enjoy this game, I may consider remaking it with a friend as a more polished release.</p>
                 </div>
+                <div class="settings-section">
+                    <h3 class="settings-title">Discord</h3>
+                    <p class="settings-description">Join our Discord server to chat, get updates, and share your progress!</p>
+                    <a href="https://discord.gg/Q5ta5KQGUg" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 8px; color: var(--accent-color, #5865f2); text-decoration: none; margin-top: 10px; padding: 8px 12px; background-color: var(--bg-medium, #2f3136); border-radius: 4px; transition: background-color 0.2s; border: 1px solid var(--bg-light, #40444b);">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" style="width: 24px; height: 24px;">
+                            <path d="M18.942 5.556a16.299 16.299 0 0 0-4.126-1.297c-.178.321-.385.754-.529 1.097a15.175 15.175 0 0 0-4.573 0 11.583 11.583 0 0 0-.535-1.097 16.274 16.274 0 0 0-4.129 1.3c-2.611 3.946-3.319 7.794-2.965 11.587a16.494 16.494 0 0 0 5.061 2.593 12.65 12.65 0 0 0 1.084-1.785 10.689 10.689 0 0 1-1.707-.831c.143-.106.283-.217.418-.331 3.291 1.539 6.866 1.539 10.118 0 .137.114.277.225.418.331-.541.326-1.114.606-1.71.832a12.52 12.52 0 0 0 1.084 1.785 16.46 16.46 0 0 0 5.064-2.595c.415-4.396-.709-8.209-2.973-11.589zM8.678 14.813c-.988 0-1.798-.922-1.798-2.045s.793-2.047 1.798-2.047 1.815.922 1.798 2.047c.001 1.123-.793 2.045-1.798 2.045zm6.644 0c-.988 0-1.798-.922-1.798-2.045s.793-2.047 1.798-2.047 1.815.922 1.798 2.047c0 1.123-.793 2.045-1.798 2.045z"/>
+                        </svg>
+                        <span style="font-weight: 500;">Join Discord Server</span>
+                    </a>
+                </div>
             </div>
         `;
     } else if (channelId === 'stats' && currentServer === 'home') {
