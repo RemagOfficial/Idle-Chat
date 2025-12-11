@@ -5808,10 +5808,10 @@ function getCascadeCost(currentCascades) {
 // Get cascade efficiency upgrade cost (for generator2)
 function getCascadeEfficiencyUpgradeCost(currentEfficiency) {
     // Each upgrade increases efficiency by 10% (0.1 -> 0.11 -> 0.121, etc.)
-    // Base cost 10000 (10x generator1 efficiency upgrade), increases by 1.2x per level
+    // Base cost 20000 (more expensive than first cascade which costs 10000), increases by 1.2x per level
     // Calculate level from efficiency: efficiency = 0.1 * (1.1 ^ level)
     const level = Math.floor(Math.log(currentEfficiency / 0.1) / Math.log(1.1));
-    return Math.floor(10000 * Math.pow(1.2, level));
+    return Math.floor(20000 * Math.pow(1.2, level));
 }
 
 // Get generator2 auto-buy delay upgrade cost
@@ -5823,10 +5823,10 @@ function getGenerator2AutoBuyDelayCost(currentLevel) {
 // Get cascade efficiency upgrade cost (for generator2)
 function getCascadeEfficiencyUpgradeCost(currentEfficiency) {
     // Each upgrade increases efficiency by 10% (0.1 -> 0.11 -> 0.121, etc.)
-    // Base cost 10000 (10x generator1 efficiency upgrade), increases by 1.2x per level
+    // Base cost 20000 (more expensive than first cascade which costs 10000), increases by 1.2x per level
     // Calculate level from efficiency: efficiency = 0.1 * (1.1 ^ level)
     const level = Math.floor(Math.log(currentEfficiency / 0.1) / Math.log(1.1));
-    return Math.floor(10000 * Math.pow(1.2, level));
+    return Math.floor(20000 * Math.pow(1.2, level));
 }
 
 // Get generator2 auto-buy delay upgrade cost
@@ -6130,14 +6130,15 @@ function getEfficiencyUpgradeCost(currentEfficiency) {
     // Each upgrade multiplies efficiency by 1.1 (compounding)
     // Calculate level from efficiency: efficiency = 1.0 * (1.1 ^ level)
     // level = log(efficiency / 1.0) / log(1.1)
+    // Base cost 2000 (more expensive than first bot which costs 1000), increases by 1.2x per level
     const level = Math.floor(Math.log(currentEfficiency / 1.0) / Math.log(1.1));
-    return Math.floor(500 * Math.pow(1.2, level));
+    return Math.floor(2000 * Math.pow(1.2, level));
 }
 
 // Get bot speed upgrade cost
 function getBotSpeedCost(currentLevel) {
-    // Base cost 250, increases more slowly (1.2x per level)
-    return Math.floor(250 * Math.pow(1.2, currentLevel));
+    // Base cost 2000 (more expensive than first bot which costs 1000), increases more slowly (1.2x per level)
+    return Math.floor(2000 * Math.pow(1.2, currentLevel));
 }
 
 // Get auto-buy delay (in seconds)
@@ -6526,14 +6527,14 @@ function getBulkCostEfficiencyCost(currentLevel, count, maxLevel) {
 
 // Get auto-generation boost cost
 function getAutoGenerationBoostCost(currentLevel) {
-    // Base cost 500, increases more slowly (1.2x per level)
-    return Math.floor(500 * Math.pow(1.2, currentLevel));
+    // Base cost 2000 (more expensive than first bot which costs 1000), increases more slowly (1.2x per level)
+    return Math.floor(2000 * Math.pow(1.2, currentLevel));
 }
 
 // Get message multiplier cost
 function getMessageMultiplierCost(currentLevel) {
-    // Base cost 1000, increases more slowly (1.2x per level)
-    return Math.floor(1000 * Math.pow(1.2, currentLevel));
+    // Base cost 2000 (more expensive than first bot which costs 1000, since it affects all generators), increases more slowly (1.2x per level)
+    return Math.floor(2000 * Math.pow(1.2, currentLevel));
 }
 
 // Get cost efficiency cost
@@ -6785,9 +6786,10 @@ function addGeneratorChannelMessage(serverId, channelId) {
     }
     channelMessages[channelKey].push(messageHtml);
     
-    // Limit stored messages
-    if (channelMessages[channelKey].length > 50) {
-        channelMessages[channelKey] = channelMessages[channelKey].slice(-50);
+    // Limit stored messages (increased from 50 to 100 for consistency)
+    const MAX_CHANNEL_MESSAGES = 100;
+    if (channelMessages[channelKey].length > MAX_CHANNEL_MESSAGES) {
+        channelMessages[channelKey] = channelMessages[channelKey].slice(-MAX_CHANNEL_MESSAGES);
     }
     
     const messageElement = document.createElement('div');
@@ -6798,8 +6800,8 @@ function addGeneratorChannelMessage(serverId, channelId) {
     
     // Remove old messages if we exceed display limit
     const messages = messagesContainer.querySelectorAll('.discord-message');
-    if (messages.length > 50) {
-        const messagesToRemove = messages.length - 50;
+    if (messages.length > MAX_CHANNEL_MESSAGES) {
+        const messagesToRemove = messages.length - MAX_CHANNEL_MESSAGES;
         for (let i = 0; i < messagesToRemove; i++) {
             messages[i].remove();
         }
@@ -7063,14 +7065,27 @@ function addFakeMessage() {
         </div>
     `;
     
-    // Store message in session
+    // Store message in session (limit to prevent memory issues)
     sessionMessages.push(messageHtml);
+    const MAX_SESSION_MESSAGES = 100;
+    if (sessionMessages.length > MAX_SESSION_MESSAGES) {
+        sessionMessages = sessionMessages.slice(-MAX_SESSION_MESSAGES);
+    }
     
     const messageElement = document.createElement('div');
     messageElement.className = 'discord-message';
     messageElement.innerHTML = messageHtml;
     
     messagesContainer.appendChild(messageElement);
+    
+    // Remove old messages if we exceed display limit
+    const messages = messagesContainer.querySelectorAll('.discord-message');
+    if (messages.length > MAX_SESSION_MESSAGES) {
+        const messagesToRemove = messages.length - MAX_SESSION_MESSAGES;
+        for (let i = 0; i < messagesToRemove; i++) {
+            messages[i].remove();
+        }
+    }
     
     // Scroll to bottom (with smooth scroll if user is near bottom)
     const isNearBottom = messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight < 100;
@@ -7086,11 +7101,58 @@ function removeOffScreenMessages(container) {
     const containerRect = container.getBoundingClientRect();
     const messages = Array.from(container.querySelectorAll('.discord-message'));
     
+    // Maximum number of messages to keep (visible + buffer)
+    const MAX_MESSAGES = 100;
+    
+    // If we have too many messages, remove the oldest ones
+    if (messages.length > MAX_MESSAGES) {
+        const messagesToRemove = messages.length - MAX_MESSAGES;
+        for (let i = 0; i < messagesToRemove; i++) {
+            messages[i].remove();
+        }
+        
+        // Also remove from sessionMessages array (for manual generation channel)
+        if (currentServer === 'home' && currentChannel === 'manual') {
+            if (sessionMessages.length > MAX_MESSAGES) {
+                sessionMessages = sessionMessages.slice(-MAX_MESSAGES);
+            }
+        }
+        
+        // Also remove from channelMessages arrays (for generator channels)
+        const channelKey = `${currentServer}-${currentChannel}`;
+        if (channelMessages[channelKey] && channelMessages[channelKey].length > MAX_MESSAGES) {
+            channelMessages[channelKey] = channelMessages[channelKey].slice(-MAX_MESSAGES);
+        }
+        
+        return; // Already cleaned up, no need to check individual positions
+    }
+    
+    // Remove messages that are far above the visible area
     messages.forEach(message => {
         const messageRect = message.getBoundingClientRect();
-        // If message is above the visible area (with some buffer), remove it
-        if (messageRect.bottom < containerRect.top - 100) {
+        // If message is above the visible area (with buffer), remove it
+        if (messageRect.bottom < containerRect.top - 500) {
             message.remove();
+            
+            // Also remove from arrays
+            if (currentServer === 'home' && currentChannel === 'manual') {
+                // Find and remove from sessionMessages
+                const messageHtml = message.innerHTML;
+                const index = sessionMessages.findIndex(msg => msg.includes(messageHtml.substring(0, 50)));
+                if (index !== -1) {
+                    sessionMessages.splice(index, 1);
+                }
+            } else {
+                // Remove from channelMessages
+                const channelKey = `${currentServer}-${currentChannel}`;
+                if (channelMessages[channelKey]) {
+                    const messageHtml = message.innerHTML;
+                    const index = channelMessages[channelKey].findIndex(msg => msg.includes(messageHtml.substring(0, 50)));
+                    if (index !== -1) {
+                        channelMessages[channelKey].splice(index, 1);
+                    }
+                }
+            }
         }
     });
 }
@@ -8714,6 +8776,18 @@ function renderChangelog() {
     // Type the date in the format YYYY-MM-DD
     const changelog = [
         {
+            version: '1.1.1',
+            date: '2025-12-11', // Release date
+            changes: [
+                'Fixed message memory leak - messages now properly removed from DOM and arrays when scrolling off screen',
+                'Increased message limit to 100 per channel for better performance',
+                'Rebalanced upgrade prices - production-affecting upgrades now cost more than base units',
+                'Bot efficiency and speed upgrades: increased base cost from 500/250 to 2000 (2x first bot cost)',
+                'Cascade efficiency upgrade: increased base cost from 10,000 to 20,000 (2x first cascade cost)',
+                'Auto generation boost and message multiplier: increased base cost from 500/1000 to 2000 (2x first bot cost)'
+            ]
+        },
+        {
             version: '1.1.0',
             date: '2025-12-10', // Release date
             changes: [
@@ -8740,7 +8814,7 @@ function renderChangelog() {
                 'Added mobile-friendly manual generation button - full-width button with tap/hold functionality',
                 'Added mobile button option in settings to toggle between button and text input',
                 'DM channel now uses mobile button on mobile devices with counter displayed above',
-                'Mobile buttons support variable generation rate (40-50 per second)',
+                'Mobile buttons support variable generation rate (40-50 per second)'
             ]
         },
         {
@@ -9004,4 +9078,3 @@ document.addEventListener('keydown', (e) => {
 
 // Initialize on page load
 init();
-
